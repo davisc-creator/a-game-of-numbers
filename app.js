@@ -1,4 +1,4 @@
-/* A Game of Numbers - standalone. No server, no accounts; data is static JSON. */
+/* Game 100 - standalone. No server, no accounts; data is static JSON. */
 
 const S = {
   manifest: null, data: null,
@@ -616,7 +616,7 @@ function wire(){
     const blob = new Blob([JSON.stringify(RECORDS)], {type: 'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `a-game-of-numbers-records-${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `game-100-records-${new Date().toISOString().slice(0,10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
   };
   $('rec-import').onclick = () => $('rec-file').click();

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A Game of Numbers - leaderboard builder v2.
+Game 100 - leaderboard builder v2.
 
 Writes one JSON per range holding a full player table per side (batting,
 pitching, awards). The client sorts a column to build a leaderboard, cuts

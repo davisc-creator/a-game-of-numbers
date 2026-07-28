@@ -1,15 +1,20 @@
 # A Game of Numbers — project brief
 
-*Named "Off the Board" until 2026-07-28. The localStorage key is still
-`offtheboard:records` and must stay that way — changing it orphans every saved
-game on every device.*
+**A Game of Numbers** is the collection. **Game 100** is the first game in it;
+**162-0** is the second and is not built yet. More are planned, so treat the
+shell as a container rather than as one game's chrome.
 
-A baseball leaderboard snake-draft game. Pick an era and a stat, players take
+*Renamed 2026-07-28. The whole thing was called "Off the Board" and the draft
+game had no separate name. The localStorage key is still `offtheboard:records`
+and must stay that way — changing it orphans every saved game on every device.*
+
+**Game 100** is a leaderboard snake draft. Pick an era and a stat, players take
 turns naming ballplayers, you score their rank on that leaderboard. Deep cuts
-pay more than obvious ones.
+pay more than obvious ones. Everything below this line describes Game 100
+unless it says otherwise.
 
-Pure static site — HTML, CSS, one JS file, and a folder of JSON. No server, no
-build step, no framework, no dependencies. It must stay that way.
+Pure static site — HTML, CSS, JS and a folder of JSON. No server, no build
+step, no framework, no dependencies. It must stay that way.
 
 ---
 

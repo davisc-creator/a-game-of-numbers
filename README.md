@@ -1,9 +1,12 @@
 # A Game of Numbers
 
-A baseball leaderboard snake draft. Pick an era and a stat, take turns naming
-players, score their rank. Deep cuts pay more than obvious ones.
+A collection of baseball games built on the Lahman database. Everything runs in
+the browser — no server, no accounts, no build step.
 
-Runs entirely in the browser. No server, no accounts, no build step.
+| Game | What it is |
+| --- | --- |
+| **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players, score their rank. Deep cuts pay more than obvious ones. |
+| **162-0** | Planned. |
 
 ## Play it locally
 
