@@ -906,14 +906,23 @@ function wire(){
   };
 }
 
-(async function boot(){
-  loadRecords(); renderSeats(); wire();
-  try{
-    await loadManifest();
-    renderRanges();
-    await loadRange();
-  }catch(e){
-    $('start-note').textContent = 'Could not load the data folder. Serve this over http, not file://';
-  }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-})();
+/* The shell owns which game is on screen. Guarded so the test suite, which
+   loads this file on its own, does not need to stub a registry. */
+if (typeof Shell !== 'undefined'){
+  Shell.register({
+    id: 'game100', el: 'game-100',
+    title: 'Game 100', tagline: 'Leaderboard snake draft',
+    isDirty: () => !!(S.G && !S.G.saved),
+    async boot(){
+      loadRecords(); renderSeats(); wire();
+      try{
+        await loadManifest();
+        renderRanges();
+        await loadRange();
+      }catch(e){
+        $('start-note').textContent = 'Could not load the data folder. Serve this over http, not file://';
+      }
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+    },
+  });
+}

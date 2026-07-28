@@ -149,3 +149,56 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .years .btn{flex:0 0 auto}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ------------------------------------------------------- game switcher */
+.switch{position:absolute;top:12px;right:14px}
+#switch-btn{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;background:transparent;color:var(--chalk-dim);
+  border:1px solid var(--rule);padding:7px 13px;border-radius:var(--radius);cursor:pointer}
+#switch-btn:hover{color:var(--chalk);border-color:var(--pole)}
+#switch-btn::after{content:" ▾"}
+#switch-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;margin:0;padding:4px;
+  list-style:none;min-width:230px;background:var(--slot);border:2px solid var(--rule);
+  box-shadow:0 10px 26px rgba(0,0,0,.45)}
+#switch-menu button{display:block;width:100%;text-align:left;background:transparent;border:0;
+  color:var(--chalk);padding:9px 11px;cursor:pointer;font-family:'Barlow Condensed',sans-serif}
+#switch-menu button:hover{background:var(--panel)}
+#switch-menu button[aria-current="true"]{background:var(--pole);color:#17251F}
+#switch-menu .t{display:block;font-family:'Bebas Neue',sans-serif;font-size:21px;letter-spacing:.05em}
+#switch-menu .d{display:block;font-size:13px;color:var(--chalk-dim);letter-spacing:.04em}
+#switch-menu button[aria-current="true"] .d{color:#2E4A3C}
+
+/* ------------------------------------------------------------- 162-0 */
+.roster{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px}
+.slot{display:flex;align-items:baseline;gap:8px;padding:6px 8px;border:1px solid var(--rule);
+  background:rgba(0,0,0,.16);min-width:0}
+.slot.on{border-color:var(--pole);background:var(--panel)}
+.slot .k{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--pole);
+  min-width:30px;font-weight:600}
+.slot .v{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.slot .i{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--chalk-dim)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:8px;
+  max-height:460px;overflow-y:auto;padding:2px}
+.pcard{display:block;width:100%;text-align:left;background:var(--panel);color:var(--chalk);
+  border:1px solid var(--rule);border-radius:var(--radius);padding:9px 10px;cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif}
+.pcard:hover:not([disabled]){border-color:var(--pole)}
+.pcard.dim{opacity:.34;cursor:not-allowed}
+.pcard .ph{display:flex;align-items:baseline;gap:7px}
+.pcard .pos{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--pole);font-weight:600}
+.pcard .nm{font-size:17px;letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard .pidx{display:flex;align-items:baseline;gap:5px;margin:3px 0 2px}
+.pcard .pidx b{font-family:'Bebas Neue',sans-serif;font-size:26px;line-height:1;color:var(--chalk-dim)}
+.pcard .pidx b.up{color:var(--pole)}
+.pcard .pidx span{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--chalk-dim);font-weight:700}
+.pcard .pline{display:flex;flex-direction:column;gap:1px;font-size:13px;color:var(--chalk-dim)}
+.pcard .pline .mono{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--chalk)}
+
+.chain{display:flex;flex-direction:column;gap:2px}
+.chain .step{display:flex;align-items:baseline;gap:11px;padding:7px 2px;
+  border-bottom:1px solid rgba(61,99,83,.45)}
+.chain .step b{font-family:'Bebas Neue',sans-serif;font-size:25px;min-width:92px;
+  text-align:right;color:var(--chalk)}
+.chain .step.last b{color:var(--pole)}
+.chain .step span{font-size:15px;color:var(--chalk-dim)}

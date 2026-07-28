@@ -6,7 +6,9 @@ the browser — no server, no accounts, no build step.
 | Game | What it is |
 | --- | --- |
 | **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players, score their rank. Deep cuts pay more than obvious ones. |
-| **162-0** | Planned. |
+| **162-0** | Spin a club and a ten-year window, take one of their players, repeat until you have a 21-man roster. Then it plays a season. |
+
+Switch between them from the **Games** menu, top right.
 
 ## Play it locally
 

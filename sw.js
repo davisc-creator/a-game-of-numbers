@@ -1,8 +1,8 @@
 /* Cache the app shell up front, then any data file the moment it's first used. */
-const SHELL = 'otb-shell-v2';
+const SHELL = 'otb-shell-v3';
 const DATA  = 'otb-data-v1';
-const FILES = ['./', './index.html', './styles.css', './app.js',
-               './manifest.webmanifest', './icon.svg'];
+const FILES = ['./', './index.html', './styles.css', './shell.js', './app.js',
+               './game1620.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -17,8 +17,9 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   /* Data files never change once generated, so cache-first is right for them and is
      what makes offline play work. The shell is the opposite: cache-first pinned every
-     installed browser to whatever app.js shipped the day it installed. */
-  if (url.pathname.includes('/data/')) {
+     installed browser to whatever app.js shipped the day it installed. The test
+     matches every data folder, not just /data/, so 162-0's seasons cache too. */
+  if (/\/data[^/]*\//.test(url.pathname)) {
     e.respondWith(
       caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
         const copy = res.clone();

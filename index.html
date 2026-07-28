@@ -16,14 +16,20 @@
 
   <div class="masthead">
     <p class="brand">A Game of Numbers</p>
-    <h1>Game 100</h1>
-    <p>Leaderboard snake draft</p>
-    <nav>
-      <button id="nav-setup" aria-current="true">New game</button>
-      <button id="nav-records">Records</button>
-      <button id="nav-rules">Rules</button>
-    </nav>
+    <h1 id="game-title">Game 100</h1>
+    <p id="game-tagline">Leaderboard snake draft</p>
+    <div class="switch">
+      <button id="switch-btn" aria-haspopup="true" aria-expanded="false">Games</button>
+      <ul id="switch-menu" class="hidden" role="menu"></ul>
+    </div>
   </div>
+
+<div id="game-100">
+  <nav>
+    <button id="nav-setup" aria-current="true">New game</button>
+    <button id="nav-records">Records</button>
+    <button id="nav-rules">Rules</button>
+  </nav>
 
   <!-- SETUP -->
   <section id="screen-setup">
@@ -225,8 +231,81 @@
       <button class="btn ghost shrink" id="to-records">See records</button>
     </div>
   </section>
+</div><!-- /game-100 -->
+
+<div id="game-1620" class="hidden">
+  <nav>
+    <button id="x-nav-setup" aria-current="true">New game</button>
+  </nav>
+
+  <section id="x-setup">
+    <div class="card">
+      <h2>Who's drafting</h2>
+      <div id="x-seat-list"></div>
+      <button class="btn ghost small" id="x-add-seat">Add a drafter</button>
+      <p class="hint">Up to four, pass-and-play. With more than one, the spin is
+      shared and picks go in snake order — a player taken is gone for everyone.</p>
+    </div>
+    <div class="card">
+      <h2>How it works</h2>
+      <p class="hint">Spin a club and a ten-year window. Everyone who played for
+      them in that stretch comes up as a card. Take one, and keep going until you
+      have a full roster: nine in the field, four on the bench, five starters, two
+      in relief and a closer. Three respins of the club, three of the era.</p>
+      <p class="hint">Every card shows OPS+ and ERA−, measured against the leagues
+      that player actually played in — a 1968 arm and a 1999 arm arrive
+      comparable. Then the roster plays 162 games and you find out how it did.</p>
+      <div class="row" style="margin-top:14px">
+        <button class="btn shrink" id="x-start" disabled>Start drafting</button>
+      </div>
+      <p class="hint" id="x-start-note">Loading…</p>
+    </div>
+  </section>
+
+  <section id="x-draft" class="hidden">
+    <div class="board" id="x-seats"></div>
+    <div class="plate">
+      <div class="meta" id="sx-whose"></div>
+      <div class="big" id="sx-club">—</div>
+      <div class="sub"><span class="mono" id="sx-era"></span></div>
+      <div class="row" style="justify-content:center;margin-top:12px">
+        <button class="btn ghost small shrink" id="sx-respin-team">Respin club</button>
+        <button class="btn ghost small shrink" id="sx-respin-era">Respin era</button>
+        <button class="btn ghost small shrink" id="sx-quit">Quit</button>
+      </div>
+    </div>
+    <p class="hint" id="sx-status"></p>
+
+    <div class="card">
+      <h2>Roster <span class="mono" id="sx-filled"></span></h2>
+      <div id="sx-roster" class="roster"></div>
+    </div>
+
+    <div class="card">
+      <h2>On this club</h2>
+      <p class="hint" id="sx-count"></p>
+      <div id="sx-cards" class="cards"></div>
+    </div>
+  </section>
+
+  <section id="x-over" class="hidden">
+    <div class="card">
+      <h2 id="x-head"></h2>
+      <div id="x-results"></div>
+    </div>
+    <div class="card">
+      <h2>How that was scored</h2>
+      <div id="x-explain"></div>
+    </div>
+    <div class="row">
+      <button class="btn shrink" id="x-again">New game</button>
+    </div>
+  </section>
+</div><!-- /game-1620 -->
 
 </div>
+<script src="shell.js"></script>
 <script src="app.js"></script>
+<script src="game1620.js"></script>
 </body>
 </html>

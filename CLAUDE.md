@@ -1,8 +1,8 @@
 # A Game of Numbers — project brief
 
-**A Game of Numbers** is the collection. **Game 100** is the first game in it;
-**162-0** is the second and is not built yet. More are planned, so treat the
-shell as a container rather than as one game's chrome.
+**A Game of Numbers** is the collection. **Game 100** and **162-0** are the two
+games in it. More are planned, so treat the shell as a container rather than as
+one game's chrome.
 
 *Renamed 2026-07-28. The whole thing was called "Off the Board" and the draft
 game had no separate name. The localStorage key is still `offtheboard:records`
@@ -18,52 +18,51 @@ step, no framework, no dependencies. It must stay that way.
 
 ---
 
-## Immediate task
+## State
 
-Get this deployed to GitHub Pages. Still not pushed as of 2026-07-28.
-
-**Done already:** the stray `~/.git` is gone. The repo exists at
-`~/Projects/a-game-of-numbers` on branch `main` with `.nojekyll` committed (247
-data files; Jekyll must not process them). Tests pass.
+Live at `https://davisc-creator.github.io/a-game-of-numbers/`, deployed from
+`main` at `~/Projects/a-game-of-numbers` via GitHub Pages (branch `main`, root,
+`.nojekyll` committed because Jekyll must not process 250+ data files).
 
 **Two working copies exist** — `~/Desktop/app` is where edits happen and
-`~/Projects/a-game-of-numbers` is the git repo. They are byte-identical apart from
-`.git`. Verify which tree you are in before running any git command:
+`~/Projects/a-game-of-numbers` is the git repo. Verify which tree you are in
+before running any git command:
 
 ```bash
-pwd && ls index.html app.js sw.js data/manifest.json tests/run.js
+pwd && ls index.html shell.js app.js game1620.js data/manifest.json
 ```
 
-Consolidating to one folder is still open. **`~/Desktop` is iCloud-synced** —
-rewriting the whole `data/` folder at once made iCloud leave 106 `"<name> 2.json"`
-conflict copies behind. After any bulk data regeneration, run
-`find data -name "* 2.json" -delete` and check the file count before committing.
-
-**Remaining:** push and enable Pages (Settings → Pages → Deploy from a branch → `main` /
-root). Target URL: `https://<user>.github.io/a-game-of-numbers/`.
+Consolidating to one folder is still open, and there is now a strong reason to:
+**`~/Desktop` is iCloud-synced.** Rewriting `data/` in bulk repeatedly left
+`"<name> 2.json"` conflict copies behind — 106 once, then 82 more that appeared
+spontaneously later. The test suite catches them as a file-count failure, which
+is the only reason they were noticed. After any bulk regeneration run
+`find data data-1620 -name "* 2.json" -delete` and check the count. The repo
+copy in `~/Projects` is not affected.
 
 **Do not run `gh auth login`, enter GitHub credentials, or create a personal
-access token.** Authentication is the user's to perform. Prepare everything up
-to that point, then hand back.
-
-After it is live, verify by fetching `<url>/data/manifest.json` — it should
-return JSON with 124 entries under `ranges`. A 404 there is the usual
-first-deploy failure and means `.nojekyll` is missing or Pages is pointed at
-the wrong branch.
+access token.** Authentication is the owner's to perform. The SSH key at
+`~/.ssh/id_ed25519` is already registered and pushes work.
 
 ---
 
 ## Layout
 
 ```
-index.html            markup for all six screens, no logic
+index.html            markup for both games, no logic
 styles.css            all styling; CSS custom properties at :root
-app.js                everything — state, data loading, game engine, records
+shell.js              game registry, switcher, hash routing
+app.js                Game 100 — state, data loading, game engine, records
+game1620.js           162-0 — spin, draft, simulation
 sw.js                 service worker, offline caching
 manifest.webmanifest  PWA metadata
 icon.svg
 build_lists.py        regenerates data/ from the Lahman database
-tests/run.js          node test suite, no dependencies, not shipped to the page
+tests/run.js          Game 100 suite, no dependencies, not shipped to the page
+tests/run1620.js      162-0 suite
+tests/run-shell.js    both games in one context: load order, switching, id collisions
+data-1620/<year>.json every player's line, franchise and position for that season
+data-1620/index.json  franchises, their seasons, and league context per year
 data/manifest.json    index of all ranges
 data/<range>.json     e.g. 2024.json, 1970-1979.json, 2000-2025.json
 data/<range>-post.json  postseason equivalents
@@ -257,9 +256,68 @@ Not requested yet; the owner will direct priorities.
 - Test locally with `python3 -m http.server 8000` — `file://` fails because the
   app fetches JSON.
 - Verify with `node --check app.js` after edits.
-- **Run `node tests/run.js` before every commit.** 104 assertions, no
-  dependencies, about six seconds. It loads `app.js` into a `vm` with a stub DOM
+- **Run all three suites before every commit** — `node tests/run.js`,
+  `node tests/run1620.js`, `node tests/run-shell.js`. 202 assertions, no
+  dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way.
   The last third of the suite walks all 247 data files and builds all 7,331
   category boards, so it catches data regressions as well as logic ones.
 - Comments explain *why* a thing is unusual, not what the line does. Match that.
+
+---
+
+## 162-0
+
+Spin a franchise and a rolling ten-year window, take one player off that club,
+repeat until the roster is full — 9 in the field, 4 on the bench, 5 starters, 2
+in relief, 1 closer — then play a season with it. Three respins of the club,
+three of the era.
+
+**Era normalization is the whole game.** League batting average was .296 in 1930
+and .237 in 1968. On raw numbers every optimal roster is a 1930s roster and the
+spin stops mattering. So every card carries OPS+ and ERA− measured against that
+player's own league-seasons, and the simulation eats those, never the raw line.
+Raw numbers still appear on the card because they are what people recognise.
+Koufax's 1.86 ERA over 1963-72 becomes a 54 ERA− — still elite, no longer
+absurd. The test suite asserts exactly that, and that the 1960s league was
+lower-scoring than the 1990s one.
+
+`data-1620/<year>.json` holds every player's line for that season plus his
+franchise and the position he actually played. Franchise-era rosters are
+assembled in the browser, for the same reason custom ranges are: rolling windows
+over 1920-2025 give 2,273 club-and-era combinations and precomputing them is
+absurd. Positions come from Lahman's `Appearances`, taking the spot a player
+started at most that season; `G_p` is in that scan so a pitcher taking his turn
+at bat is identified as a pitcher rather than defaulting to DH. Skip that and
+half the "hitters" are pitchers.
+
+A card has to clear a playing-time floor for that club in that window — 200 AB
+or 50 IP — or a spin returns three hundred September call-ups.
+
+**Scoring is Pythagorean and every step is shown on the results screen.** Team
+on-base and slugging relative to their own leagues, multiplied against a
+reference offence of 4.4 runs a game, gives runs scored; staff ERA− weighted by
+a realistic innings split gives runs allowed; `RS^1.83 / (RS^1.83 + RA^1.83)`
+gives the win rate; 162 weighted coin flips give the record. It was chosen for
+explainability, not accuracy. Park factors, platoon splits and defence beyond
+position eligibility are deliberately absent — each adds accuracy and costs more
+explanation than it returns.
+
+## The shell
+
+`shell.js` holds a registry, swaps which game element is visible, keeps the
+masthead in step, and routes `#/game100` and `#/1620`. Games register
+themselves; the shell knows nothing about their internals.
+
+This is **not** the `$`-scoped refactor sketched in
+`docs/shell-architecture.md`. That rewrites fifty working, tested call sites in
+Game 100 to solve an id collision that does not exist — the two games share no
+element ids, and `tests/run-shell.js` asserts it stays that way. Do the refactor
+if a third game ever wants to reuse ids, not before.
+
+Two things that look incidental and are not:
+
+- **Boot is deferred.** Games register when their own script runs, which is
+  after `shell.js`. Booting inline would find an empty registry.
+- **A draft in progress is only in memory.** `isDirty()` lets the shell confirm
+  before a switch throws it away.
