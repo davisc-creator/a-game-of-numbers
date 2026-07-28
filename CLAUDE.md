@@ -37,7 +37,7 @@ Consolidating to one folder is still open, and there is now a strong reason to:
 `"<name> 2.json"` conflict copies behind — 106 once, then 82 more that appeared
 spontaneously later. The test suite catches them as a file-count failure, which
 is the only reason they were noticed. After any bulk regeneration run
-`find data data-1620 -name "* 2.json" -delete` and check the count. The repo
+`find data data-teams -name "* 2.json" -delete` and check the count. The repo
 copy in `~/Projects` is not affected.
 
 **Do not run `gh auth login`, enter GitHub credentials, or create a personal
@@ -61,8 +61,9 @@ build_lists.py        regenerates data/ from the Lahman database
 tests/run.js          Game 100 suite, no dependencies, not shipped to the page
 tests/run1620.js      162-0 suite
 tests/run-shell.js    both games in one context: load order, switching, id collisions
-data-1620/<year>.json every player's line, franchise and position for that season
-data-1620/index.json  franchises, their seasons, and league context per year
+data-teams/<year>.json  one row per player per franchise per season, full stat set
+data-teams/<year>-post.json  postseason equivalent
+data-teams/index.json   franchises, their seasons, and league context per year
 data/manifest.json    index of all ranges
 data/<range>.json     e.g. 2024.json, 1970-1979.json, 2000-2025.json
 data/<range>-post.json  postseason equivalents
@@ -323,7 +324,7 @@ Koufax's 1.86 ERA over 1963-72 becomes a 54 ERA− — still elite, no longer
 absurd. The test suite asserts exactly that, and that the 1960s league was
 lower-scoring than the 1990s one.
 
-`data-1620/<year>.json` holds every player's line for that season plus his
+`data-teams/<year>.json` holds every player's line for that season plus his
 franchise and the position he actually played. Franchise-era rosters are
 assembled in the browser, for the same reason custom ranges are: rolling windows
 over 1920-2025 give 2,273 club-and-era combinations and precomputing them is
@@ -362,3 +363,38 @@ Two things that look incidental and are not:
   after `shell.js`. Booting inline would find an empty registry.
 - **A draft in progress is only in memory.** `isDirty()` lets the shell confirm
   before a switch throws it away.
+
+
+---
+
+## Team boards
+
+Two different questions, and the difference is the whole feature:
+
+- **What they did there** (`buildTeamRange`) — the club's own record book. Only
+  what a player did *for that club* counts. Randy Johnson shows 86 strikeouts
+  for the Giants and does not make their board.
+- **Anyone who played there** (`buildTeamMembers`) — the men who wore the shirt,
+  with everything they did in the era wherever they did it. Randy Johnson shows
+  3,749 and tops it.
+
+`data-teams/` carries one row per **(player, franchise, season)**, which is why
+the first mode is honest: 8.2% of player-seasons involve more than one club, so
+attributing a traded man's whole season to his "primary" team would have been a
+lot of quiet fiction. The split also made 162-0's rosters more accurate, since
+it filters the same rows.
+
+Three things worth not undoing:
+
+- **League context stays league-wide.** A club's ace is measured against the
+  baseball everyone was playing, not against his own rotation — otherwise every
+  team fields an average staff by definition.
+- **Club boards drop the awards side.** An All-Star selection or an MVP cannot
+  be split by team in any way this data supports. Membership boards keep them,
+  because there the stats are the player's own anyway.
+- **Membership always comes from the regular season**, even for a postseason
+  board. A man on a postseason roster was on the regular-season one; the reverse
+  is not true.
+
+Both modes re-rank and re-cut from scratch, because the pool shrank — a top 100
+of the Giants is not a slice of the top 100 of baseball.

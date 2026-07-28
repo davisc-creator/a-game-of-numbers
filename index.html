@@ -71,6 +71,20 @@
     </div>
 
     <div class="card">
+      <h2>Teams</h2>
+      <div class="pill-set" id="team-mode">
+        <button class="pill" data-tm="all" aria-pressed="true">All of baseball</button>
+        <button class="pill" data-tm="only">What they did there</button>
+        <button class="pill" data-tm="played">Anyone who played there</button>
+      </div>
+      <div id="team-picker" class="hidden">
+        <input type="text" id="team-search" placeholder="Search a club, e.g. Yankees" autocomplete="off" style="margin-top:10px">
+        <div class="pill-set scroller" id="team-set"></div>
+        <p class="hint" id="team-note"></p>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Category</h2>
       <div class="grp-label">Batting</div>
       <div class="pill-set" id="cats-bat"></div>

@@ -3,7 +3,7 @@
 const S = {
   manifest: null, data: null,
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
-  seats: ['', ''], rounds: 12, G: null, recSort: 'ppg',
+  seats: ['', ''], rounds: 12, G: null, recSort: 'ppg', teams: [], teamMode: 'all',
   fmt: {on: false, mode: 'bo', n: 7, randCat: false, randEra: false},
   SR: null,
 };
@@ -53,21 +53,31 @@ async function loadManifest(){
   const spans = S.manifest.ranges.filter(r => r.kind === 'span');
   S.rangeId = (spans[spans.length - 1] || S.manifest.ranges[0]).id;
 }
+function activeYears(){
+  if (S.custom) return [S.custom.y0, S.custom.y1];
+  const r = (S.manifest && S.manifest.ranges || []).find(x => x.id === S.rangeId);
+  return r ? [r.y0, r.y1] : null;
+}
+
 async function loadRange(){
   $('start-note').textContent = 'Loading\u2026';
   $('start').disabled = true;
+  const yrs = activeYears();
   try{
-    S.data = S.custom
-      ? await buildCustom(S.custom.y0, S.custom.y1, S.post)
-      : await (await fetch(`data/${S.rangeId}${S.post ? '-post' : ''}.json`)).json();
+    S.data = S.teams.length && yrs
+      ? (S.teamMode === 'only'
+          ? await buildTeamRange(yrs[0], yrs[1], S.post, S.teams)
+          : await buildTeamMembers(yrs[0], yrs[1], S.post, S.teams))
+      : await baseRange(S.post);
   }catch(e){
     S.data = null;
     $('start-note').textContent = 'Could not load that era.';
     return;
   }
   if (!S.data){
-    $('start-note').textContent = S.post
-      ? 'No postseason play in those years.' : 'Nothing to play in those years.';
+    $('start-note').textContent = S.teams.length
+      ? 'Those clubs have nothing rankable in that span. Widen the years or pick another club.'
+      : S.post ? 'No postseason play in those years.' : 'Nothing to play in those years.';
     return;
   }
   if (!S.data.cats[S.catId]) S.catId = Object.keys(S.data.cats)[0];
@@ -253,6 +263,183 @@ async function buildCustom(y0, y1, post){
   if (!Object.keys(cats).length) return null;
   const label = y0 === y1 ? String(y0) : `${y0}–${y1}`;
   return {id: `${y0}-${y1}`, label, y0, y1, post, sides, cats};
+}
+
+/* ------------------------------------------------------------- team boards */
+/* One club, or several, instead of all of baseball. Rows in data-teams are split
+   per franchise, so a traded man's numbers land with the club he earned them at
+   rather than following him around - 8.2% of player-seasons involve more than
+   one team, which is too many to fudge.
+
+   The league context for ERA- is still the whole league. A club's ace is
+   measured against the baseball everyone was playing, not against his own
+   rotation, or every team would field an average staff by definition. */
+const TX = {ix: null, files: new Map()};
+
+async function loadTeamIndex(){
+  if (!TX.ix) TX.ix = await fetch('data-teams/index.json').then(r => r.json());
+  return TX.ix;
+}
+function teamFile(y, post){
+  const k = y + (post ? '-post' : '');
+  if (!TX.files.has(k))
+    TX.files.set(k, fetch(`data-teams/${k}.json`).then(r => r.ok ? r.json() : null).catch(() => null));
+  return TX.files.get(k);
+}
+
+async function buildTeamRange(y0, y1, post, teams){
+  await loadShared();
+  await loadTeamIndex();
+  const M = CX.meta, want = new Set(teams);
+  const years = [];
+  for (let y = y0; y <= y1; y++) years.push(y);
+  const files = (await Promise.all(years.map(y => teamFile(y, post)))).filter(Boolean);
+  if (!files.length) return null;
+
+  const sums = {bat: new Map(), pit: new Map()};
+  const have = {bat: new Set(), pit: new Set()};
+  let lgOuts = 0, lgER = 0;
+
+  for (const f of files){
+    for (const key of ['bat', 'pit']){
+      const s = f[key];
+      if (!s) continue;
+      s.cols.forEach(c => have[key].add(c));
+      const oi = s.cols.indexOf('IPouts'), ei = s.cols.indexOf('ER');
+      for (let i = 0; i < s.rows.length; i++){
+        if (key === 'pit'){
+          if (oi >= 0) lgOuts += s.rows[i][oi];
+          if (ei >= 0) lgER += s.rows[i][ei];
+        }
+        if (!want.has(s.fr[i])) continue;
+        const id = s.ids[i];
+        let e = sums[key].get(id);
+        if (!e){ e = {}; sums[key].set(id, e); }
+        for (let c = 0; c < s.cols.length; c++)
+          e[s.cols[c]] = (e[s.cols[c]] || 0) + s.rows[i][c];
+      }
+    }
+  }
+  if (!sums.bat.size && !sums.pit.size) return null;
+
+  const sides = {}, cats = {};
+  for (const t of sums.bat.values()){
+    t.TB  = (t.H || 0) + (t.X2B || 0) + 2 * (t.X3B || 0) + 3 * (t.HR || 0);
+    t.XBH = (t.X2B || 0) + (t.X3B || 0) + (t.HR || 0);
+    t.B1  = (t.H || 0) - (t.X2B || 0) - (t.X3B || 0) - (t.HR || 0);
+  }
+  ['TB', 'XBH', 'B1'].forEach(c => have.bat.add(c));
+  {
+    const [side, c] = sideFrom(sums.bat, M.bat, y0, [], have.bat, M);
+    if (side){ sides.bat = side; Object.entries(c).forEach(([k, v]) => cats[k] = {...v, side: 'bat'}); }
+  }
+
+  let defs = M.pit.slice();
+  if (sums.pit.size){
+    for (const t of sums.pit.values()) t.IP = rnd((t.IPouts || 0) / 3, 1);
+    have.pit.add('IP');
+    const lgIP = lgOuts / 3, lgEra = lgIP ? lgER * 9 / lgIP : 0;
+    if (!post && lgEra){
+      const sched = years.reduce((a, y) => a + (CX.league.g[y] || 0), 0);
+      const minIP = Math.min(1500, Math.max(40, rnd(M.era_rate * sched, 0)));
+      for (const t of sums.pit.values())
+        t.ERAm = (t.IP > 0 && t.IP >= minIP) ? rnd((t.ER * 9 / t.IP) / lgEra * 100, 1) : 0;
+      have.pit.add('ERAm');
+      defs = defs.concat([['pit_era', 'ERAm', `ERA- (min ${minIP} IP)`, 'ERA-', 1920]]);
+    }
+    const [side, c] = sideFrom(sums.pit, defs, y0, ['IP', 'ER', 'IPouts'], have.pit, M);
+    if (side){ sides.pit = side; Object.entries(c).forEach(([k, v]) => cats[k] = {...v, side: 'pit'}); }
+  }
+
+  /* No awards side: an All-Star selection or an MVP is not a team statistic in
+     any way this data can honestly split, so a team board leaves them out. */
+  if (!Object.keys(cats).length) return null;
+  const names = teams.map(t => (TX.ix.franchises[t] || {}).name || t);
+  const span = y0 === y1 ? String(y0) : `${y0}–${y1}`;
+  return {id: `${teams.join('+')}_${y0}-${y1}`,
+          label: `${names.join(' + ')} · ${span}`,
+          y0, y1, post, teams, sides, cats};
+}
+
+/* The other way to read "only this team": not the club's own numbers, but the
+   men who wore the shirt - with everything they did, wherever they did it. So
+   Randy Johnson counts for the Giants on the strength of his whole career, not
+   on the half-season he spent there. */
+async function teamMembers(y0, y1, teams){
+  await loadTeamIndex();
+  const want = new Set(teams), ids = new Set();
+  const years = [];
+  for (let y = y0; y <= y1; y++) years.push(y);
+  /* membership always comes from the regular season: a man on a postseason
+     roster was on the regular-season one too, and the reverse is not true */
+  const files = (await Promise.all(years.map(y => teamFile(y, false)))).filter(Boolean);
+  for (const f of files)
+    for (const key of ['bat', 'pit']){
+      const s = f[key];
+      if (!s) continue;
+      for (let i = 0; i < s.rows.length; i++) if (want.has(s.fr[i])) ids.add(s.ids[i]);
+    }
+  return ids;
+}
+
+async function baseRange(post){
+  return S.custom
+    ? await buildCustom(S.custom.y0, S.custom.y1, post)
+    : await (await fetch(`data/${S.rangeId}${post ? '-post' : ''}.json`)).json();
+}
+
+async function buildTeamMembers(y0, y1, post, teams){
+  await loadShared();
+  const ids = await teamMembers(y0, y1, teams);
+  if (!ids.size) return null;
+  const base = await baseRange(post);
+  if (!base) return null;
+  const M = CX.meta, sides = {}, cats = {};
+
+  for (const [key, s] of Object.entries(base.sides)){
+    if (!s.ids) continue;
+    const rows = [], keep = [];
+    s.rows.forEach((r, i) => { if (ids.has(s.ids[i])){ rows.push(r); keep.push(s.ids[i]); } });
+    if (rows.length) sides[key] = {cols: s.cols, rows, ids: keep};
+  }
+  /* the pool shrank, so every list has to be re-ranked and re-cut */
+  for (const [cid, c] of Object.entries(base.cats)){
+    const s = sides[c.side];
+    if (!s) continue;
+    const i = s.cols.indexOf(c.col) + 1;
+    if (i === 0) continue;
+    const asc = c.dir === 'asc';
+    const series = s.rows.map(r => r[i]).filter(v => v > 0).sort((a, b) => asc ? a - b : b - a);
+    const depth = depthOf(series, M.max_depth, M.max_tie_tail);
+    if (depth > 0) cats[cid] = {...c, depth};
+  }
+  for (const s of Object.values(sides)){
+    const seen = new Map();
+    for (const r of s.rows) seen.set(r[0], (seen.get(r[0]) || 0) + 1);
+    const who = {};
+    s.rows.forEach((r, i) => {
+      if (seen.get(r[0]) > 1){
+        const span = CX.players.s[s.ids[i]];
+        if (span) who[String(i)] = ['', span];
+      }
+    });
+    if (Object.keys(who).length) s.who = who;
+  }
+  if (!Object.keys(cats).length) return null;
+  const names = teams.map(t => (TX.ix.franchises[t] || {}).name || t);
+  const span = y0 === y1 ? String(y0) : `${y0}\u2013${y1}`;
+  return {id: `${teams.join('+')}~${y0}-${y1}`,
+          label: `Played for ${names.join(' + ')} \u00b7 ${span}`,
+          y0, y1, post, teams, mode: 'played', sides, cats};
+}
+
+/* Which clubs actually existed inside a span. */
+function teamsInRange(y0, y1){
+  if (!TX.ix) return [];
+  return Object.entries(TX.ix.franchises)
+    .filter(([, v]) => v.y1 >= y0 && v.y0 <= y1)
+    .map(([id, v]) => ({id, name: v.name, y0: v.y0, y1: v.y1}))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /* Build the playable board, the foul band, and a lookup index over everyone. */
@@ -774,7 +961,38 @@ function renderRanges(){
     `<button class="pill" data-range="${r.id}" aria-pressed="${S.rangeId === r.id}">${r.label}</button>`).join('')
     || '<p class="hint">Nothing matches.</p>';
   $('range-set').querySelectorAll('[data-range]').forEach(el =>
-    el.onclick = () => { S.rangeId = el.dataset.range; S.custom = null; renderRanges(); loadRange(); });
+    el.onclick = () => { S.rangeId = el.dataset.range; S.custom = null; renderRanges(); renderTeams(); loadRange(); });
+}
+
+const TEAM_MODES = {
+  only:   'Only what a player did **for that club** counts. A traded man\u2019s other numbers stay with his other team, so this is the club\u2019s own record book. Awards are left out \u2014 they cannot honestly be split by team.',
+  played: 'Anyone who **wore the shirt** in this era, with their whole line for the era, wherever they earned it. Randy Johnson counts for the Giants on his full record, not on the half-season he spent there.',
+};
+
+async function renderTeams(){
+  const on = S.teamMode !== 'all';
+  $('team-picker').classList.toggle('hidden', !on);
+  if (!on) return;
+  await loadTeamIndex();
+  const yrs = activeYears();
+  if (!yrs){ $('team-set').innerHTML = '<p class="hint">Pick an era first.</p>'; return; }
+  const q = $('team-search').value.trim().toLowerCase();
+  let list = teamsInRange(yrs[0], yrs[1]);
+  if (q) list = list.filter(t => t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
+  $('team-set').innerHTML = list.map(t =>
+    `<button class="pill" data-team="${t.id}" aria-pressed="${S.teams.includes(t.id)}"
+             title="${esc(t.name)} ${t.y0}\u2013${t.y1}">${esc(t.name)}</button>`).join('')
+    || '<p class="hint">No clubs match.</p>';
+  $('team-set').querySelectorAll('[data-team]').forEach(el => el.onclick = () => {
+    const id = el.dataset.team;
+    S.teams = S.teams.includes(id) ? S.teams.filter(x => x !== id) : S.teams.concat([id]);
+    renderTeams(); loadRange();
+  });
+  const n = S.teams.length;
+  const blurb = (TEAM_MODES[S.teamMode] || '').replace(/\*\*(.+?)\*\*/g, '$1');
+  $('team-note').textContent = n
+    ? `${n} club${n === 1 ? '' : 's'} selected. ${blurb}`
+    : `${list.length} clubs played inside this era. ${blurb}`;
 }
 
 function renderCats(){
@@ -996,6 +1214,15 @@ function wire(){
 
   $('add-seat').onclick = () => { if (S.seats.length < 4){ S.seats.push(''); renderSeats(); } };
   $('range-search').oninput = renderRanges;
+  $('team-search').oninput = renderTeams;
+  document.querySelectorAll('#team-mode .pill').forEach(el => el.onclick = () => {
+    S.teamMode = el.dataset.tm;
+    document.querySelectorAll('#team-mode .pill').forEach(x =>
+      x.setAttribute('aria-pressed', String(x.dataset.tm === S.teamMode)));
+    if (S.teamMode === 'all'){ S.teams = []; renderTeams(); return loadRange(); }
+    renderTeams();
+    if (S.teams.length) loadRange();
+  });
   document.querySelectorAll('#kind-set .pill').forEach(el => el.onclick = () => {
     S.kind = el.dataset.kind;
     document.querySelectorAll('#kind-set .pill').forEach(x => x.setAttribute('aria-pressed','false'));

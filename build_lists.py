@@ -311,13 +311,13 @@ def write_globals(D):
 
 
 ##############################################################################
-# 162-0: one file per season holding every player's line, his franchise and
-# the position he actually played. Franchise-era rosters are assembled in the
-# browser from these, because rolling ten-year windows over 1920-2025 give 97
-# windows across 93 franchises and precomputing 9,000 files is absurd.
+# Per-team season lines. One row per player per franchise per season, so a
+# traded man's stats land with the club he earned them at - 8.2% of
+# player-seasons involve more than one team, which is too many to fudge.
+# Feeds both the team filter in Game 100 and the rosters in 162-0.
 ##############################################################################
 
-OUT_1620 = os.environ.get('OUT_1620', 'data-1620')
+OUT_TEAMS = os.environ.get('OUT_TEAMS', 'data-teams')
 
 # G_p is in the scan so a pitcher taking his turn at bat is identified as a
 # pitcher and kept out of the hitter pool, rather than defaulting to DH.
@@ -325,11 +325,13 @@ POS_COLS = [('G_c', 'C'), ('G_1b', '1B'), ('G_2b', '2B'), ('G_3b', '3B'),
             ('G_ss', 'SS'), ('G_lf', 'LF'), ('G_cf', 'CF'), ('G_rf', 'RF'),
             ('G_dh', 'DH'), ('G_p', 'P')]
 FIELD_POS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH']
-BAT_1620 = ['AB', 'H', 'X2B', 'X3B', 'HR', 'BB', 'HBP', 'SF', 'R', 'RBI', 'SB', 'G']
-PIT_1620 = ['IPouts', 'ER', 'H', 'BB', 'SO', 'HR', 'W', 'L', 'SV', 'GS', 'G']
+
+# everything Game 100 ranks, so a team-filtered board offers the same categories
+BAT_T = ['G','AB','R','H','X2B','X3B','HR','RBI','BB','SO','SB','CS','IBB','HBP','SH','SF','GIDP']
+PIT_T = ['W','L','G','GS','IPouts','ER','SO','BB','SV','CG','SHO','HR','WP','H']
 
 
-def load_1620(D):
+def load_teams():
     import pyreadr
     def tbl(n):
         return list(pyreadr.read_r(os.path.join(LAHMAN_DIR, n + '.RData')).values())[0]
@@ -337,102 +339,113 @@ def load_1620(D):
     app['yearID'] = app.yearID.astype(int)
     tms['yearID'] = tms.yearID.astype(int)
 
-    # (teamID, year) -> franchID, and the franchise's most recent name
     franch = {(str(t), int(y)): str(f)
               for t, y, f in zip(tms.teamID, tms.yearID, tms.franchID)}
     names = {}
     for f, y, n in sorted(zip(tms.franchID, tms.yearID, tms.name), key=lambda r: r[1]):
         names[str(f)] = str(n)
 
-    # (playerID, year) -> the position he started at most that season
     app = app[(app.yearID >= FIRST_YEAR) & (app.yearID <= LAST_YEAR)]
     cols = [c for c, _ in POS_COLS if c in app.columns]
-    grp = app.groupby(['playerID', 'yearID'])[cols].sum()
+    labels = [lbl for c, lbl in POS_COLS if c in app.columns]
+    grp = app.groupby(['playerID', 'yearID', 'teamID'])[cols].sum()
     pos_of = {}
-    for (pid, yr), row in zip(grp.index, grp.values):
+    for (pid, yr, tid), row in zip(grp.index, grp.values):
+        fr = franch.get((str(tid), int(yr)))
+        if not fr:
+            continue
         best, n = None, 0
-        for (c, label), v in zip([p for p in POS_COLS if p[0] in cols], row):
+        for lbl, v in zip(labels, row):
             if v and v > n:
-                best, n = label, v
+                best, n = lbl, v
         if best:
-            pos_of[(pid, int(yr))] = best
+            pos_of[(pid, int(yr), fr)] = best
     return franch, names, pos_of
 
 
-def build_1620(D, franch, pos_of):
-    os.makedirs(OUT_1620, exist_ok=True)
+def team_side(df, y, cols, franch):
+    """One row per (player, franchise) for this season."""
+    d = df[df.yearID == y]
+    if not len(d) or 'teamID' not in d.columns:
+        return None
+    d = d.copy()
+    d['fr'] = [franch.get((str(t), y)) for t in d.teamID]
+    d = d[d.fr.notna()]
+    if not len(d):
+        return None
+    have = [c for c in cols if c in d.columns]
+    agg = d.groupby(['playerID', 'fr'], as_index=False)[have].sum()
+    return agg, have
+
+
+def build_teams(D, franch, pos_of):
+    os.makedirs(OUT_TEAMS, exist_ok=True)
     idx = D['idx_of']
-    seasons, lg = {}, {}
+    seasons, lg, total = {}, {}, 0
 
-    def team_of(df, y):
-        """playerID -> franchise he played most games for that season."""
-        d = df[df.yearID == y]
-        if not len(d) or 'teamID' not in d.columns:
-            return {}, d
-        best = {}
-        for pid, tid, g in zip(d.playerID, d.teamID, d.G.fillna(0)):
-            fr = franch.get((str(tid), y))
-            if fr and g >= best.get(pid, (None, -1))[1]:
-                best[pid] = (fr, g)
-        return {p: f for p, (f, _) in best.items()}, d
+    for post in (False, True):
+        bsrc = D['bpost'] if post else D['bat']
+        psrc = D['ppost'] if post else D['pit']
+        for y in range(FIRST_YEAR, LAST_YEAR + 1):
+            out = {'y': y, 'post': post}
 
-    total = 0
-    for y in range(FIRST_YEAR, LAST_YEAR + 1):
-        out = {'y': y}
+            got = team_side(bsrc, y, BAT_T, franch)
+            if got:
+                agg, have = got
+                rows, ids, frs, poss = [], [], [], []
+                for pid, fr, vals in zip(agg.playerID, agg.fr, agg[have].fillna(0).values):
+                    if pid not in idx:
+                        continue
+                    pos = pos_of.get((pid, y, fr), 'DH')
+                    if pos == 'P':          # pitchers hit, but they are not hitters
+                        continue
+                    rows.append([num(v) for v in vals])
+                    ids.append(idx[pid]); frs.append(fr); poss.append(pos)
+                if rows:
+                    out['bat'] = {'cols': have, 'ids': ids, 'fr': frs, 'pos': poss, 'rows': rows}
 
-        fb, b = team_of(D['bat'], y)
-        if len(b):
-            agg = b.groupby('playerID', as_index=False).sum(numeric_only=True)
-            rows, ids, frs, poss = [], [], [], []
-            for pid, vals in zip(agg.playerID, agg[[c for c in BAT_1620]].fillna(0).values):
-                if pid not in idx or pid not in fb:
-                    continue
-                pos = pos_of.get((pid, y), 'DH')
-                if pos == 'P':          # pitchers hit, but they are not hitters
-                    continue
-                rows.append([num(v) for v in vals])
-                ids.append(idx[pid]); frs.append(fb[pid])
-                poss.append(pos)
-            if rows:
-                out['bat'] = {'cols': BAT_1620, 'ids': ids, 'fr': frs, 'pos': poss, 'rows': rows}
+            got = team_side(psrc, y, PIT_T, franch)
+            if got:
+                agg, have = got
+                rows, ids, frs = [], [], []
+                for pid, fr, vals in zip(agg.playerID, agg.fr, agg[have].fillna(0).values):
+                    if pid not in idx:
+                        continue
+                    rows.append([num(v) for v in vals])
+                    ids.append(idx[pid]); frs.append(fr)
+                if rows:
+                    out['pit'] = {'cols': have, 'ids': ids, 'fr': frs, 'rows': rows}
 
-        fp, p = team_of(D['pit'], y)
-        if len(p):
-            agg = p.groupby('playerID', as_index=False).sum(numeric_only=True)
-            rows, ids, frs = [], [], []
-            for pid, vals in zip(agg.playerID, agg[[c for c in PIT_1620]].fillna(0).values):
-                if pid not in idx or pid not in fp:
-                    continue
-                rows.append([num(v) for v in vals])
-                ids.append(idx[pid]); frs.append(fp[pid])
-            if rows:
-                out['pit'] = {'cols': PIT_1620, 'ids': ids, 'fr': frs, 'rows': rows}
+            if 'bat' not in out and 'pit' not in out:
+                continue
 
-        # league context for this season, so rate stats can be made relative
-        if 'bat' in out:
-            c = out['bat']['cols']
-            tot = {k: 0 for k in ('AB', 'H', 'X2B', 'X3B', 'HR', 'BB', 'HBP', 'SF')}
-            for r in out['bat']['rows']:
-                for k in tot:
-                    tot[k] += r[c.index(k)]
-            lg.setdefault(str(y), {}).update(tot)
-        if 'pit' in out:
-            c = out['pit']['cols']
-            er = sum(r[c.index('ER')] for r in out['pit']['rows'])
-            outs = sum(r[c.index('IPouts')] for r in out['pit']['rows'])
-            hr = sum(r[c.index('HR')] for r in out['pit']['rows'])
-            bb = sum(r[c.index('BB')] for r in out['pit']['rows'])
-            so = sum(r[c.index('SO')] for r in out['pit']['rows'])
-            lg.setdefault(str(y), {}).update(ER=er, IPouts=outs, pHR=hr, pBB=bb, pSO=so)
+            # whole-league context for this season, so a rate can be made
+            # relative even when the board is filtered to one club
+            key = str(y) + ('p' if post else '')
+            tot = {}
+            if 'bat' in out:
+                c = out['bat']['cols']
+                for k in ('AB', 'H', 'X2B', 'X3B', 'HR', 'BB', 'HBP', 'SF'):
+                    if k in c:
+                        tot[k] = sum(r[c.index(k)] for r in out['bat']['rows'])
+            if 'pit' in out:
+                c = out['pit']['cols']
+                for k, lab in (('ER', 'ER'), ('IPouts', 'IPouts'), ('HR', 'pHR'),
+                               ('BB', 'pBB'), ('SO', 'pSO')):
+                    if k in c:
+                        tot[lab] = sum(r[c.index(k)] for r in out['pit']['rows'])
+            lg[key] = tot
 
-        path = os.path.join(OUT_1620, f'{y}.json')
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
-        total += os.path.getsize(path)
+            fn = f'{y}-post.json' if post else f'{y}.json'
+            path = os.path.join(OUT_TEAMS, fn)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
+            total += os.path.getsize(path)
 
-        for side in ('bat', 'pit'):
-            for fr in set(out.get(side, {}).get('fr', [])):
-                seasons.setdefault(fr, set()).add(y)
+            if not post:
+                for side in ('bat', 'pit'):
+                    for fr in set(out.get(side, {}).get('fr', [])):
+                        seasons.setdefault(fr, set()).add(y)
 
     return seasons, lg, total
 
@@ -443,9 +456,9 @@ def main():
     n_players, n_awards = write_globals(D)
     print(f"players.json {n_players}  awards.json {n_awards} player-seasons")
 
-    franch, fnames, pos_of = load_1620(D)
-    seasons, lg, sz = build_1620(D, franch, pos_of)
-    with open(os.path.join(OUT_1620, 'index.json'), 'w', encoding='utf-8') as f:
+    franch, fnames, pos_of = load_teams()
+    seasons, lg, sz = build_teams(D, franch, pos_of)
+    with open(os.path.join(OUT_TEAMS, 'index.json'), 'w', encoding='utf-8') as f:
         json.dump({'first': FIRST_YEAR, 'last': LAST_YEAR, 'window': 10,
                    'pos': FIELD_POS,
                    'franchises': {k: {'name': fnames.get(k, k),
@@ -453,7 +466,7 @@ def main():
                                   for k, v in sorted(seasons.items())},
                    'league': lg},
                   f, ensure_ascii=False, separators=(',', ':'))
-    print(f"162-0: {len(seasons)} franchises, {sz/1024/1024:.1f} MB\n")
+    print(f"teams: {len(seasons)} franchises, {sz/1024/1024:.1f} MB\n")
     ranges = [(y, y, str(y), str(y), 'season') for y in range(FIRST_YEAR, LAST_YEAR + 1)]
     for d in range(1920, LAST_YEAR + 1, 10):
         a, b = max(d, FIRST_YEAR), min(d + 9, LAST_YEAR)

@@ -40,6 +40,15 @@ AirDrop or email yourself the file, **Import records** on the other. Merging is
 by game timestamp, so importing twice is harmless and neither side loses
 anything.
 
+## Teams
+
+Play all of baseball, or narrow it to one club or several. Two modes, because
+they answer different questions: **what they did there** is the club's own
+record book, where only what a player did in that shirt counts; **anyone who
+played there** takes everyone who passed through and uses their whole line for
+the era. Randy Johnson is 86 strikeouts to the Giants under the first and 3,749
+under the second.
+
 ## Series
 
 Play a single game or a series: best of N, first to N wins, first to N points,

@@ -36,7 +36,7 @@ const pct = n => (n * 1000 < 1000 ? '.' : '') + String(Math.round(n * 1000)).pad
 /* ------------------------------------------------------------------- data */
 async function seasonOf(y){
   if (!G.files.has(y))
-    G.files.set(y, fetch(`data-1620/${y}.json`).then(r => r.ok ? r.json() : null).catch(() => null));
+    G.files.set(y, fetch(`data-teams/${y}.json`).then(r => r.ok ? r.json() : null).catch(() => null));
   return G.files.get(y);
 }
 
@@ -407,7 +407,7 @@ Shell.register({
     showScreen('setup');
     try{
       const [ix, players] = await Promise.all([
-        fetch('data-1620/index.json').then(r => r.json()),
+        fetch('data-teams/index.json').then(r => r.json()),
         fetch('data/players.json').then(r => r.json()),
       ]);
       G.ix = ix; G.players = players;

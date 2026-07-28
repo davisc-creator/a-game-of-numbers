@@ -70,13 +70,13 @@ const app = load();
   }
 
   group('data');
-  const ix = JSON.parse(fs.readFileSync(path.join(ROOT, 'data-1620', 'index.json'), 'utf8'));
+  const ix = JSON.parse(fs.readFileSync(path.join(ROOT, 'data-teams', 'index.json'), 'utf8'));
   const players = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'players.json'), 'utf8'));
   app.G.ix = ix; app.G.players = players;
   {
     const years = [];
     for (let y = ix.first; y <= ix.last; y++) years.push(y);
-    const missing = years.filter(y => !fs.existsSync(path.join(ROOT, 'data-1620', `${y}.json`)));
+    const missing = years.filter(y => !fs.existsSync(path.join(ROOT, 'data-teams', `${y}.json`)));
     eq(missing, [], 'a season file for every year 1920-2025');
     ok(Object.keys(ix.franchises).length > 40, 'franchise index is populated');
     ok(!!ix.league['1968'] && !!ix.league['1999'], 'league context per season');

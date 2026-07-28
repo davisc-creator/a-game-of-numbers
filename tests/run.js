@@ -86,7 +86,8 @@ function loadApp(){
    alive, openLeft, startGame, submitGuess, score, foul, strike, finish, advance,
    careerStats, profileFor, DEPTH_BUCKETS, S, buildCustom, rnd, depthOf, CX,
    startSeries, seriesTake, seriesTarget, seriesLabel, seriesStanding, SMODES,
-   renderSeries, renderSeriesHistory,
+   renderSeries, renderSeriesHistory, buildTeamRange, buildTeamMembers,
+   teamMembers, teamsInRange, loadTeamIndex, TX,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -753,6 +754,80 @@ async function customRanges(){
   ok(spanned > 0 || shared === 0, 'chooser options carry a career span');
 }
 
+/* ======================================================== team boards */
+async function teamBoards(){
+  group('team boards');
+  await app.loadTeamIndex();
+  app.S.manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));
+  app.S.rangeId = '1994-2025'; app.S.custom = null; app.S.post = false;
+
+  const only   = await app.buildTeamRange(1994, 2025, false, ['SFG']);
+  const played = await app.buildTeamMembers(1994, 2025, false, ['SFG']);
+  ok(!!only && !!played, 'both modes build a board');
+
+  /* the case that separates them: a great career, a short stay */
+  const find = (d, cat, name) => {
+    app.S.data = d; app.S.catId = cat;
+    const P = app.buildPool();
+    const hit = (P.byName.get(name.toLowerCase()) || [])[0];
+    return hit ? {val: hit.val, rank: hit.rank, zone: hit.zone} : null;
+  };
+  const rjOnly = find(only, 'pit_so', 'Randy Johnson');
+  const rjAll  = find(played, 'pit_so', 'Randy Johnson');
+  ok(rjOnly && rjAll, 'Randy Johnson is in both');
+  ok(rjAll.val > rjOnly.val * 10,
+     `his full record dwarfs his Giants stint (${rjAll.val} K vs ${rjOnly.val})`);
+  ok(rjOnly.zone !== 'board', 'his Giants line does not make the club board');
+  eq(rjAll.rank, 1, 'his full record tops the anyone-who-played-there board');
+
+  eq(only.label, 'San Francisco Giants · 1994–2025', 'club board says whose it is');
+  ok(/^Played for /.test(played.label), 'and the other mode says so plainly');
+
+  ok(!only.cats.awd_as, 'a club board leaves awards out');
+  ok(!!played.cats.awd_as, 'an anyone-who-played-there board keeps them');
+
+  /* a club board must not contain anyone who never played for the club */
+  const ids = await app.teamMembers(1994, 2025, ['SFG']);
+  const stray = (only.sides.bat.ids || []).filter(i => !ids.has(i));
+  eq(stray.slice(0, 3), [], 'nobody on the club board is a stranger to the club');
+
+  /* every board is smaller than all of baseball, and still well-formed */
+  const all = JSON.parse(fs.readFileSync(path.join(DATA, '1994-2025.json'), 'utf8'));
+  ok(only.sides.bat.rows.length < all.sides.bat.rows.length, 'a club board is a subset');
+  ok(played.sides.bat.rows.length < all.sides.bat.rows.length, 'so is a membership board');
+  ok(played.sides.bat.rows.length > only.sides.bat.rows.length,
+     'and membership is the looser of the two');
+
+  for (const [name, d] of [['club', only], ['membership', played]]){
+    app.S.data = d;
+    const bad = [];
+    for (const cid of Object.keys(d.cats)){
+      app.S.catId = cid;
+      const P = app.buildPool();
+      if (!P.board.length) bad.push(`${cid} empty`);
+      if (P.board[0].rank !== 1) bad.push(`${cid} does not start at 1`);
+      if (P.board.some(e => e.rank > 100)) bad.push(`${cid} ranks past 100`);
+    }
+    eq(bad.slice(0, 3), [], `${name} board: every category re-ranks cleanly`);
+  }
+
+  /* two clubs at once */
+  const both = await app.buildTeamRange(1994, 2025, false, ['SFG', 'LAD']);
+  ok(both.sides.bat.rows.length > only.sides.bat.rows.length, 'two clubs give a bigger pool');
+  ok(/Giants \+ /.test(both.label), 'and the label names both');
+
+  /* the traded-player split is the reason this data exists */
+  const y = JSON.parse(fs.readFileSync(path.join(ROOT, 'data-teams', '1998.json'), 'utf8'));
+  const seen = new Map();
+  for (const id of y.bat.ids) seen.set(id, (seen.get(id) || 0) + 1);
+  ok([...seen.values()].some(n => n > 1), 'a traded player has a row per club, not one blended row');
+
+  const clubs = app.teamsInRange(1994, 2025);
+  ok(clubs.length >= 30, `${clubs.length} clubs existed in that span`);
+  ok(clubs.every(c => c.y1 >= 1994 && c.y0 <= 2025), 'and every one of them overlaps it');
+  ok(!app.teamsInRange(1925, 1930).some(c => c.id === 'ARI'), 'a club is absent from an era before it existed');
+}
+
 /* -------------------------------------------------------------------- done */
 function done(){
   console.log(`\n${'─'.repeat(52)}`);
@@ -764,4 +839,4 @@ function done(){
   process.exit(fail === 0 ? 0 : 1);
 }
 
-customRanges().then(done, e => { console.error(e); process.exit(1); });
+customRanges().then(teamBoards).then(done, e => { console.error(e); process.exit(1); });
