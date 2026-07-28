@@ -180,6 +180,12 @@ eq(app.norm("Ken Griffey Jr."), 'ken griffey', 'norm drops Jr. and periods');
 eq(app.norm('  Cal   Ripken  '), 'cal ripken', 'norm collapses whitespace');
 eq(app.norm("O'Neill"), 'oneill', 'norm drops apostrophes');
 eq(app.norm('Jean-Luc Picard'), 'jean luc picard', 'norm splits hyphens');
+eq(app.norm('C. J. Cron'), 'cj cron', 'norm joins spaced initials — Lahman writes them apart');
+eq(app.norm('CJ Cron'), 'cj cron', 'and typing them together lands in the same place');
+eq(app.norm('C.J. Cron'), 'cj cron', 'as does the half-spaced spelling');
+eq(app.norm('J. D. Martinez'), 'jd martinez', 'same for any two initials');
+eq(app.norm('w mays'), 'w mays', 'a lone initial is left alone, so first-initial search still works');
+eq(app.norm('A. B. C. Smith'), 'abc smith', 'a longer run joins too');
 eq(app.norm(null), '', 'norm tolerates null');
 eq(app.lastOf('Babe Ruth'), 'ruth', 'lastOf');
 eq(app.firstOf('Babe Ruth'), 'babe', 'firstOf');
@@ -222,6 +228,11 @@ group('buildPool');
   eq(P.foul.length, 0, 'a short list has no foul band at all');
 }
 {
+  /* names Lahman writes with spaced initials have to be reachable */
+  {
+    const P = poolFor(app, 'bat_h');
+    ok(!!P, 'fixture builds');
+  }
   /* the whole point of the change: how deep the list is ranked must not move
      the scoring cut. `bat_h6` ranks 130 deep, `bat_h` claims 3. Same board. */
   const shallow = poolFor(app, 'bat_h'), deep = poolFor(app, 'bat_h6');
@@ -535,6 +546,61 @@ group('full game to completion');
 }
 
 /* ================================================== real data integrity */
+group('names as people actually type them');
+{
+  const d = JSON.parse(fs.readFileSync(path.join(DATA, '2000-2025.json'), 'utf8'));
+  app.S.data = d; app.S.catId = 'bat_h'; app.S.rangeId = '2000-2025';
+  app.S.post = false; app.S.seats = ['A', 'B']; app.S.rounds = 12;
+  app.startGame(); app.__drain();
+
+  /* the reported bug: "CJ Cron" said he never played. He did. */
+  for (const q of ['CJ Cron', 'C.J. Cron', 'c j cron', 'C. J. Cron']){
+    const r = app.resolve(q);
+    ok(r.k !== 'none', `"${q}" finds someone`);
+    ok(r.e && r.e.name === 'C. J. Cron', `"${q}" finds the right man`, r.e && r.e.name);
+  }
+  const jd = app.resolve('JD Martinez');
+  ok(jd.k === 'hit' && /Martinez/.test(jd.e.name), 'JD Martinez lands on the board');
+
+  /* how many of the spaced-initial players are now reachable at all */
+  const P = app.S.G.pool;
+  const spaced = [];
+  for (const list of P.byName.values())
+    for (const e of list) if (/^[A-Z]\. [A-Z]\. /.test(e.name)) spaced.push(e.name);
+  const uniq = [...new Set(spaced)];
+  ok(uniq.length > 20, `${uniq.length} spaced-initial players in this era`);
+  /* "J. J. Hardy" as a person would type it: "JJ Hardy" */
+  const typed = n => n.replace(/\./g, '').replace(/\b([A-Z]) ([A-Z])\b/g, '$1$2');
+  const unreachable = uniq.filter(n => app.resolve(typed(n)).k === 'none');
+  eq(unreachable.slice(0, 3), [], 'every one of them answers to the run-together spelling');
+  const wrongMan = uniq.filter(n => {
+    const r = app.resolve(typed(n));
+    return r.e && r.e.name !== n && r.k !== 'choose';
+  });
+  eq(wrongMan.slice(0, 3), [], 'and none of them resolves to somebody else');
+}
+{
+  /* display names that differ but normalise the same must still offer a choice,
+     not be silently awarded - "Jose Lopez" and "José Lopez" are two men */
+  const d = JSON.parse(fs.readFileSync(path.join(DATA, '2000-2025.json'), 'utf8'));
+  const rows = d.sides.bat.rows, who = d.sides.bat.who || {};
+  const byNorm = new Map();
+  rows.forEach((r, i) => {
+    const k = app.norm(r[0]);
+    if (!byNorm.has(k)) byNorm.set(k, []);
+    byNorm.get(k).push(i);
+  });
+  const shared = [...byNorm].filter(([, ix]) => ix.length > 1);
+  ok(shared.length > 0, `${shared.length} normalised names cover more than one man`);
+  const naked = shared.filter(([, ix]) => ix.some(i => !who[i]));
+  eq(naked.slice(0, 3).map(([k]) => k), [], 'every one of them carries identity data');
+
+  const mixed = shared.filter(([, ix]) => new Set(ix.map(i => rows[i][0])).size > 1);
+  ok(mixed.length > 0, `${mixed.length} of them are spelled differently on the page`);
+  ok(mixed.every(([, ix]) => ix.every(i => who[i])),
+     'including the ones whose display names differ — the old rule missed these');
+}
+
 group('shipped data');
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));

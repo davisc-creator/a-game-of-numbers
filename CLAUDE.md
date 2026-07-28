@@ -145,9 +145,26 @@ plate, where the first pick overwrote it — which reads as a bug the moment a
 deep list pays out 153 points and nothing on screen says the list runs 500 deep.
 The rank *is* the score by design; the boundary being invisible was the defect.
 
-Name matching (`norm`, `resolve` in app.js) strips accents, punctuation and
-Jr./Sr., resolves bare last names when only one board player matches, handles
+Name matching (`norm`, `resolve` in app.js) strips accents and punctuation,
+resolves bare last names when only one board player matches, handles
 "first-initial lastname", and falls back to Levenshtein distance.
+
+Three rules in `norm` that look fussy and are each load-bearing:
+
+- **Spaced initials are joined.** Lahman writes "C. J. Cron" and "A. J.
+  Burnett"; people type "CJ Cron". 123 players are written this way, and before
+  this they answered to nothing — the game said they never played.
+- **A lone initial is left alone**, so "w mays" still finds Willie Mays.
+- **A Jr./Sr./II/III/IV suffix is only stripped at the end of the name.**
+  Stripping it anywhere turned "JR Murphy" into "Murphy" and handed the player a
+  different man. Only two names in the whole set carry a suffix, but two
+  players' *initials* are J.R.
+
+Suffix-stripping means "Ken Griffey Jr." and "Ken Griffey" normalise the same,
+which is intended — they are two men and the chooser separates them. Lahman
+mostly does not store suffixes anyway: Vladimir Guerrero Jr. is recorded as
+plain "Vladimir Guerrero", identical to his father, so that pair was already
+handled.
 
 ---
 

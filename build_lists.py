@@ -14,7 +14,7 @@ Postseason     -> <range>-post.json
 Source: github.com/cdalzell/Lahman  (1871-2025)
 Needs:  pip install pandas pyreadr
 """
-import json, os
+import json, os, re
 import pandas as pd
 
 FIRST_YEAR, LAST_YEAR = 1920, 2025
@@ -142,6 +142,31 @@ def depth_of(values):
     return max(keep, 0)
 
 
+def norm_name(s):
+    """Mirror of norm() in app.js. The client decides two men share a name by
+    this, so `who` has to be keyed by it - "Jose Lopez" and "Jose Lopez" with an
+    accent are different display names that collide once accents come off."""
+    import unicodedata
+    t = unicodedata.normalize('NFD', s or '')
+    t = ''.join(c for c in t if not unicodedata.combining(c)).lower()
+    t = re.sub(r"[.'\u2019`]", '', t)
+    t = re.sub(r'[^a-z\s-]', ' ', t)
+    t = re.sub(r'-', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    t = re.sub(r' (jr|sr|ii|iii|iv)$', '', t)      # a suffix is only a suffix at the end
+    out, run = [], ''
+    for w in t.split(' '):
+        if len(w) == 1:
+            run += w
+        else:
+            if run:
+                out.append(run); run = ''
+            out.append(w)
+    if run:
+        out.append(run)
+    return ' '.join(out)
+
+
 def num(v):
     v = float(v)
     return int(v) if v == int(v) else round(v, 2)
@@ -174,9 +199,10 @@ def make_side(agg, cat_defs, name_of, y0, extra_cols=(), ident=None, idx_of=None
     if ident:
         seen = {}
         for r in rows:
-            seen[r[0]] = seen.get(r[0], 0) + 1
+            k = norm_name(r[0])
+            seen[k] = seen.get(k, 0) + 1
         for i, (pid, r) in enumerate(zip(pids, rows)):
-            if seen[r[0]] > 1:
+            if seen[norm_name(r[0])] > 1:
                 team, span = ident.get(pid, (None, None))
                 if team or span:
                     who[str(i)] = [team or '', span or '']

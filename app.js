@@ -24,11 +24,25 @@ const ord = n => {
 };
 
 function norm(s){
-  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const t = (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[.'\u2019`]/g, '')
-    .replace(/\b(jr|sr|ii|iii|iv)\b/g, ' ')
     .replace(/[^a-z\s-]/g, ' ').replace(/-/g, ' ')
-    .replace(/\s+/g, ' ').trim();
+    .replace(/\s+/g, ' ').trim()
+    /* only at the end: a suffix is a suffix. Stripping it anywhere turned
+       "JR Murphy" into "Murphy" and handed the player a different man. */
+    .replace(/ (jr|sr|ii|iii|iv)$/, '');
+  /* Lahman writes initials apart - "C. J. Cron", "A. J. Burnett" - and people
+     type them together. Join runs of two or more single letters so both spellings
+     land in the same bucket. A lone initial is left alone, because "w mays" still
+     has to find Willie Mays. 123 players are written this way. */
+  const out = [];
+  let run = '';
+  for (const w of t.split(' ')){
+    if (w.length === 1) run += w;
+    else { if (run){ out.push(run); run = ''; } out.push(w); }
+  }
+  if (run) out.push(run);
+  return out.join(' ');
 }
 const lastOf  = s => { const p = norm(s).split(' '); return p[p.length - 1] || ''; };
 const firstOf = s => norm(s).split(' ')[0] || '';
@@ -166,10 +180,10 @@ function sideFrom(totals, defs, y0, extra, have, M){
   /* Namesakes again. A custom range has no per-range team, so the chooser gets
      the career span alone - still enough to tell two men apart. */
   const seen = new Map();
-  for (const r of rows) seen.set(r[0], (seen.get(r[0]) || 0) + 1);
+  for (const r of rows) seen.set(norm(r[0]), (seen.get(norm(r[0])) || 0) + 1);
   const who = {};
   rows.forEach((r, i) => {
-    if (seen.get(r[0]) > 1){
+    if (seen.get(norm(r[0])) > 1){
       const span = CX.players.s[kept[i]];
       if (span) who[String(i)] = ['', span];
     }
@@ -415,10 +429,10 @@ async function buildTeamMembers(y0, y1, post, teams){
   }
   for (const s of Object.values(sides)){
     const seen = new Map();
-    for (const r of s.rows) seen.set(r[0], (seen.get(r[0]) || 0) + 1);
+    for (const r of s.rows) seen.set(norm(r[0]), (seen.get(norm(r[0])) || 0) + 1);
     const who = {};
     s.rows.forEach((r, i) => {
-      if (seen.get(r[0]) > 1){
+      if (seen.get(norm(r[0])) > 1){
         const span = CX.players.s[s.ids[i]];
         if (span) who[String(i)] = ['', span];
       }
