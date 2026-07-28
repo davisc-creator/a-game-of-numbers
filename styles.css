@@ -202,3 +202,7 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
   text-align:right;color:var(--chalk)}
 .chain .step.last b{color:var(--pole)}
 .chain .step span{font-size:15px;color:var(--chalk-dim)}
+
+/* series standings reuse the result rows; only the games list needs a nudge */
+#ser-table .result-row .sc{min-width:44px;text-align:right}
+#ser-history .hist:last-child{border-bottom:0}

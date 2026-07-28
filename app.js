@@ -4,6 +4,8 @@ const S = {
   manifest: null, data: null,
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
   seats: ['', ''], rounds: 12, G: null, recSort: 'ppg',
+  fmt: {on: false, mode: 'bo', n: 7, randCat: false, randEra: false},
+  SR: null,
 };
 /* The scoring rule, and the only place it lives. Rank 1-100 scores its own
    rank, 101-110 is the foul band, 111 and beyond is a strike - regardless of
@@ -364,6 +366,7 @@ function resolve(raw){
 
 /* ------------------------------------------------------------------ game */
 function startGame(){
+  if (S.fmt.on && (!S.SR || S.SR.done)) startSeries();
   const pool = buildPool();
   S.G = {
     rangeId: S.rangeId, post: S.post, cat: S.catId,
@@ -514,14 +517,19 @@ function strike(raw, e){
 
 function finish(){
   const G = S.G;
+  let rec = null;
   if (!G.saved){
     G.saved = true;
     const best = Math.max(...G.players.map(p => p.pts));
-    RECORDS.push({ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
+    rec = {ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
       depth: G.pool.depth,
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
-        win: p.pts === best}))});
+        win: p.pts === best}))};
+    /* the series fields ride along on an otherwise ordinary game record, so
+       nothing that reads records has to know series exist */
+    if (S.SR){ rec.sid = S.SR.id; rec.sno = S.SR.games.length + 1; rec.smode = S.SR.mode; rec.sn = S.SR.n; }
+    RECORDS.push(rec);
     saveRecords();
   }
   const ranked = [...G.players].sort((a, b) => b.pts - a.pts);
@@ -537,7 +545,163 @@ function finish(){
   $('missed').innerHTML = left.length
     ? left.map(e => `${String(e.rank).padStart(4,' ')}  ${esc(e.name)}  \u00b7  ${fmtVal(e.val)} ${G.abbr}`).join('<br>')
     : 'Every player got taken.';
+  if (S.SR && rec){
+    seriesTake(rec);
+    renderSeries();
+    return show('series');
+  }
   show('over');
+}
+
+/* ---------------------------------------------------------------- series */
+/* A series is a run of ordinary games sharing an id. Nothing about the game
+   engine changes; the series only decides whether another one starts and keeps
+   the running tally. Each finished game still writes its own record, so career
+   stats and profiles carry on working untouched - the series fields are extra. */
+
+const SMODES = {
+  bo:     {label: 'Best of',       unit: 'games',  note: n => `First to ${Math.floor(n / 2) + 1} wins, at most ${n} games.`},
+  wins:   {label: 'First to',      unit: 'wins',   note: n => `Plays until somebody has won ${n} game${n === 1 ? '' : 's'}.`},
+  points: {label: 'First to',      unit: 'points', note: n => `Plays until somebody's running total reaches ${n}.`},
+  games:  {label: 'Fixed',         unit: 'games',  note: n => `Exactly ${n} game${n === 1 ? '' : 's'}, most points overall wins.`},
+};
+const seriesTarget = sr => sr.mode === 'bo' ? Math.floor(sr.n / 2) + 1 : sr.n;
+
+function seriesLabel(sr){
+  const m = SMODES[sr.mode];
+  return sr.mode === 'bo' ? `Best of ${sr.n}` : `${m.label} ${sr.n} ${m.unit}`;
+}
+
+function startSeries(){
+  S.SR = {
+    id: Date.now(), mode: S.fmt.mode, n: S.fmt.n,
+    randCat: S.fmt.randCat, randEra: S.fmt.randEra,
+    names: S.seats.map((n, i) => (n.trim() || `Drafter ${i + 1}`)),
+    wins: {}, pts: {}, games: [], done: false,
+  };
+}
+
+/* Fold a finished game into the running tally and decide whether that ends it. */
+function seriesTake(rec){
+  const sr = S.SR;
+  /* A drawn game advances nobody. The record's own `win` flag marks every top
+     scorer, which is right for career stats, but crediting both here let a
+     best-of-three end 2-2 after two draws. Points still accumulate. */
+  const top = Math.max(...rec.players.map(p => p.pts));
+  const leaders = rec.players.filter(p => p.pts === top);
+  const winner = leaders.length === 1 ? leaders[0].name : null;
+
+  sr.games.push({
+    no: sr.games.length + 1, label: rec.label, range: rec.range, post: rec.post,
+    drawn: !winner,
+    scores: rec.players.map(p => ({name: p.name, pts: p.pts, win: p.name === winner})),
+  });
+  for (const p of rec.players) sr.pts[p.name] = (sr.pts[p.name] || 0) + p.pts;
+  if (winner) sr.wins[winner] = (sr.wins[winner] || 0) + 1;
+
+  const target = seriesTarget(sr);
+  const best = k => Math.max(0, ...Object.values(sr[k]));
+  if (sr.mode === 'points')      sr.done = best('pts') >= target;
+  else if (sr.mode === 'games')  sr.done = sr.games.length >= sr.n;
+  else if (sr.mode === 'bo')     sr.done = best('wins') >= target || sr.games.length >= sr.n;
+  /* first-to-N-wins has no natural end if every game is drawn, so it is capped;
+     the standings screen also offers "End series now" at any point */
+  else                           sr.done = best('wins') >= target || sr.games.length >= 99;
+  return sr.done;
+}
+
+function seriesStanding(){
+  const sr = S.SR;
+  return sr.names.map(n => ({name: n, wins: sr.wins[n] || 0, pts: sr.pts[n] || 0}))
+    .sort((a, b) => b.wins - a.wins || b.pts - a.pts);
+}
+
+function renderSeries(){
+  const sr = S.SR, rows = seriesStanding(), target = seriesTarget(sr);
+  const lead = rows[0], tied = rows.filter(r => r.wins === lead.wins && r.pts === lead.pts);
+
+  $('ser-head').textContent = sr.done
+    ? (tied.length > 1 ? 'Series tied' : `${lead.name} takes the series`)
+    : `${seriesLabel(sr)} — game ${sr.games.length + 1}`;
+  $('ser-sub').textContent = sr.done
+    ? `${sr.games.length} game${sr.games.length === 1 ? '' : 's'} played.`
+    : SMODES[sr.mode].note(sr.n);
+
+  $('ser-table').innerHTML = rows.map((r, i) => `
+    <div class="result-row ${i === 0 && sr.done ? 'win' : ''}">
+      <div class="pos">${i + 1}</div>
+      <div class="nm">${esc(r.name)}</div>
+      <div class="sc">${sr.mode === 'points' ? r.pts : r.wins}</div>
+    </div>`).join('');
+
+  $('ser-games').innerHTML = sr.games.length ? [...sr.games].reverse().map(g => `
+    <div class="hist">
+      <div class="top">
+        <div class="cat">${esc(g.label)} <span class="mono">${esc(g.range || '')}${g.post ? ' post' : ''}</span></div>
+        <div class="when">Game ${g.no}</div>
+      </div>
+      <div class="line">${g.scores.slice().sort((a, b) => b.pts - a.pts)
+        .map(s => `${s.win ? '★ ' : ''}${esc(s.name)} ${s.pts}`).join('   ·   ')}</div>
+    </div>`).join('') : '<p class="hint">None yet.</p>';
+
+  $('ser-next').classList.toggle('hidden', sr.done);
+  $('ser-done').textContent = sr.done ? 'Done' : 'End series now';
+}
+
+/* Random era has to land on a range that actually exists for this season type. */
+async function seriesNextGame(){
+  const sr = S.SR;
+  if (sr.randEra && S.manifest){
+    const pool = S.manifest.ranges.filter(r => S.post ? r.post : r.reg);
+    if (pool.length){
+      S.custom = null;
+      S.rangeId = pool[Math.floor(Math.random() * pool.length)].id;
+      renderRanges();
+      await loadRange();
+    }
+  }
+  if (sr.randCat && S.data){
+    const keys = Object.keys(S.data.cats);
+    if (keys.length) S.catId = keys[Math.floor(Math.random() * keys.length)];
+    renderCats();
+  }
+  if (!S.data || !S.data.cats[S.catId]){
+    setMsg('Could not load the next era. Ending the series here.', 'warn');
+    sr.done = true; renderSeries(); return;
+  }
+  startGame();
+}
+
+function renderSeriesHistory(){
+  const by = new Map();
+  for (const g of RECORDS){
+    if (!g.sid) continue;
+    let e = by.get(g.sid);
+    if (!e){ e = {id: g.sid, mode: g.smode, n: g.sn, ts: g.ts, games: [], wins: {}, pts: {}}; by.set(g.sid, e); }
+    e.games.push(g);
+    e.ts = Math.max(e.ts, g.ts);
+    for (const p of (g.players || [])){
+      const k = (p.name || '').trim();
+      e.pts[k] = (e.pts[k] || 0) + (p.pts || 0);
+      if (p.win) e.wins[k] = (e.wins[k] || 0) + 1;
+    }
+  }
+  const list = [...by.values()].sort((a, b) => b.ts - a.ts).slice(0, 20);
+  $('ser-hist-empty').classList.toggle('hidden', list.length > 0);
+  $('ser-history').innerHTML = list.map(e => {
+    const rows = Object.keys(e.pts).map(n => ({name: n, wins: e.wins[n] || 0, pts: e.pts[n] || 0}))
+      .sort((a, b) => b.wins - a.wins || b.pts - a.pts);
+    const label = e.mode === 'bo' ? `Best of ${e.n}`
+      : `${(SMODES[e.mode] || {}).label || e.mode} ${e.n} ${(SMODES[e.mode] || {}).unit || ''}`.trim();
+    const score = rows.map(r => `${esc(r.name)} ${e.mode === 'points' ? r.pts : r.wins}`).join('–');
+    return `<div class="hist">
+      <div class="top">
+        <div class="cat">${esc(label)} <span class="mono">${e.games.length} game${e.games.length === 1 ? '' : 's'}</span></div>
+        <div class="when">${new Date(e.ts).toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}</div>
+      </div>
+      <div class="line">★ ${score}</div>
+    </div>`;
+  }).join('');
 }
 
 /* ---------------------------------------------------------------- render */
@@ -695,6 +859,7 @@ function renderRecords(){
   $('rec-key').textContent = rows.length
     ? 'Hit rate is picks that landed. Depth is the average rank of those picks \u2014 higher means further down the list, which is the harder knowledge.'
     : '';
+  renderSeriesHistory();
   const h = [...RECORDS].reverse().slice(0, 40);
   $('hist-empty').classList.toggle('hidden', h.length > 0);
   $('hist-list').innerHTML = h.map(g => {
@@ -812,7 +977,7 @@ function renderProfile(name){
 }
 
 /* ------------------------------------------------------------------- nav */
-const SCREENS = ['setup','rules','records','profile','game','over'];
+const SCREENS = ['setup','rules','records','profile','game','series','over'];
 function show(name){
   SCREENS.forEach(s => $('screen-' + s).classList.toggle('hidden', s !== name));
   ['setup','rules','records'].forEach(s => {
@@ -827,7 +992,7 @@ function wire(){
   $('nav-records').onclick = () => { renderRecords(); show('records'); };
   $('to-records').onclick  = () => { renderRecords(); show('records'); };
   $('prof-back').onclick   = () => { renderRecords(); show('records'); };
-  $('again').onclick       = () => show('setup');
+  $('again').onclick       = () => { S.SR = null; show('setup'); };
 
   $('add-seat').onclick = () => { if (S.seats.length < 4){ S.seats.push(''); renderSeats(); } };
   $('range-search').oninput = renderRanges;
@@ -883,7 +1048,44 @@ function wire(){
     document.querySelectorAll('#rounds-set .pill').forEach(x => x.setAttribute('aria-pressed','false'));
     el.setAttribute('aria-pressed','true');
   });
-  $('start').onclick  = startGame;
+  /* ---- format: single game or a series ---- */
+  const press = (sel, on) => document.querySelectorAll(sel).forEach(x =>
+    x.setAttribute('aria-pressed', String(on(x))));
+  const syncSeries = () => {
+    const m = SMODES[S.fmt.mode];
+    $('s-n-label').textContent = m.unit === 'points' ? 'Points' : (S.fmt.mode === 'bo' ? 'Games' : m.unit === 'wins' ? 'Wins' : 'Games');
+    $('s-n-note').textContent = m.note(S.fmt.n);
+    $('series-opts').classList.toggle('hidden', !S.fmt.on);
+    press('#fmt-set .pill', x => (x.dataset.fmt === 'series') === S.fmt.on);
+    press('#smode-set .pill', x => x.dataset.smode === S.fmt.mode);
+    press('#svary-set .pill', x => x.dataset.vary === 'cat' ? S.fmt.randCat : S.fmt.randEra);
+  };
+  document.querySelectorAll('#fmt-set .pill').forEach(el => el.onclick = () => {
+    S.fmt.on = el.dataset.fmt === 'series'; S.SR = null; syncSeries();
+  });
+  document.querySelectorAll('#smode-set .pill').forEach(el => el.onclick = () => {
+    S.fmt.mode = el.dataset.smode;
+    /* a sane default for each mode, since 7 points is not a series */
+    S.fmt.n = {bo: 7, wins: 3, points: 500, games: 5}[S.fmt.mode];
+    $('s-n').value = S.fmt.n;
+    syncSeries();
+  });
+  $('s-n').oninput = () => {
+    const v = parseInt($('s-n').value, 10);
+    if (Number.isInteger(v) && v > 0) S.fmt.n = v;
+    syncSeries();
+  };
+  document.querySelectorAll('#svary-set .pill').forEach(el => el.onclick = () => {
+    if (el.dataset.vary === 'cat') S.fmt.randCat = !S.fmt.randCat;
+    else S.fmt.randEra = !S.fmt.randEra;
+    syncSeries();
+  });
+  syncSeries();
+
+  $('ser-next').onclick = () => seriesNextGame();
+  $('ser-done').onclick = () => { S.SR = null; renderRecords(); show('records'); };
+
+  $('start').onclick  = () => { S.SR = null; startGame(); };
   $('submit').onclick = submitGuess;
   $('guess').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submitGuess(); } });
   $('quit').onclick = () => { if (S.G) finish(); };

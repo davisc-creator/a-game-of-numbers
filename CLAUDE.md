@@ -234,7 +234,30 @@ Two things to preserve when touching this:
 - **Export/import merges by `ts`.** Re-importing the same file is harmless.
   Do not switch to index-based merging.
 
-Records are per-device. There is no sync and no backend, by design.
+Records are per-device. There is no sync and no backend, by design — nothing a
+player does is sent anywhere. Moving them between devices is Export on one and
+Import on the other; the merge is by `ts`, so importing the same file twice is
+harmless. The Records screen says so, because "why aren't my records on my
+phone" is otherwise a reasonable thing to read as a bug.
+
+---
+
+## Series
+
+A series is a run of ordinary games sharing an `sid`. The game engine is
+untouched: a series only decides whether another game starts and keeps the
+running tally. Each game still writes its own record with the series fields
+(`sid`, `sno`, `smode`, `sn`) riding along, so `careerStats` and `profileFor`
+carry on working without knowing series exist. The suite asserts that.
+
+Four formats, in `SMODES`: best of N, first to N wins, first to N points
+(cumulative across games), and a fixed number of games. Either or both of the
+era and the category can be re-rolled between games.
+
+**A drawn game advances nobody.** The record's own `win` flag marks every top
+scorer, which is right for career stats — but crediting both in a series let a
+best-of-three finish 2–2 after two draws. Points still accumulate. First-to-N-wins
+is capped at 99 games so a series of nothing but draws cannot run forever.
 
 ---
 

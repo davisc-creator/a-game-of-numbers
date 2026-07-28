@@ -85,6 +85,8 @@ function loadApp(){
 ;({norm, lastOf, firstOf, lev, ord, fmtVal, esc, buildPool, resolve, order, seat,
    alive, openLeft, startGame, submitGuess, score, foul, strike, finish, advance,
    careerStats, profileFor, DEPTH_BUCKETS, S, buildCustom, rnd, depthOf, CX,
+   startSeries, seriesTake, seriesTarget, seriesLabel, seriesStanding, SMODES,
+   renderSeries, renderSeriesHistory,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -367,6 +369,105 @@ group('the cut is always on screen');
     ok(P.board.every(e => e.rank <= 100), `${cat}: nothing past 100 scores`);
     ok(P.foul.every(e => e.rank > 100 && e.rank <= 110), `${cat}: the foul band is 101-110`);
   }
+}
+
+group('series');
+{
+  const rec = (ts, a, b) => ({ts, range: '2024', cat: 'bat_h', label: 'Hits', post: false,
+    players: [{name: 'A', pts: a, picks: 1, strikes: 0, fouls: 0, ranks: [a], win: a >= b},
+              {name: 'B', pts: b, picks: 1, strikes: 0, fouls: 0, ranks: [b], win: b >= a}]});
+  const run = (mode, n, games) => {
+    app.S.fmt = {on: true, mode, n, randCat: false, randEra: false};
+    app.S.seats = ['A', 'B'];
+    app.startSeries();
+    let done = false, played = 0;
+    for (const [a, b] of games){
+      if (done) break;
+      done = app.seriesTake(rec(1000 + played, a, b));
+      played++;
+    }
+    return {done, played, sr: app.S.SR, standing: app.seriesStanding()};
+  };
+
+  eq(app.seriesTarget({mode: 'bo', n: 7}), 4, 'best of 7 needs four wins');
+  eq(app.seriesTarget({mode: 'bo', n: 3}), 2, 'best of 3 needs two');
+  eq(app.seriesLabel({mode: 'bo', n: 5}), 'Best of 5', 'best-of label');
+  eq(app.seriesLabel({mode: 'points', n: 500}), 'First to 500 points', 'points label');
+  eq(app.seriesLabel({mode: 'wins', n: 3}), 'First to 3 wins', 'wins label');
+
+  {
+    const r = run('bo', 7, [[10,1],[10,1],[1,10],[10,1],[10,1],[9,9],[9,9]]);
+    ok(r.done, 'best of 7 ends as soon as someone takes four');
+    eq(r.played, 5, 'after five games, not seven');
+    eq(r.standing[0].name, 'A', 'and the right player leads');
+    eq(r.standing[0].wins, 4, 'with four wins');
+  }
+  {
+    const r = run('bo', 3, [[1,10],[1,10],[10,1]]);
+    ok(r.done && r.played === 2, 'best of 3 ends at two straight');
+    eq(r.standing[0].name, 'B', 'won by B');
+  }
+  {
+    const r = run('wins', 3, [[10,1],[1,10],[10,1],[1,10],[10,1],[10,1]]);
+    ok(r.done, 'first to 3 wins ends');
+    eq(r.standing[0].wins, 3, 'at exactly three');
+    eq(r.played, 5, 'taking five games to get there');
+  }
+  {
+    const r = run('points', 500, [[200,100],[200,100],[200,100]]);
+    ok(r.done, 'first to 500 points ends');
+    eq(r.played, 3, 'when the running total crosses');
+    eq(r.standing[0].pts, 600, 'on cumulative points, not per game');
+  }
+  {
+    const r = run('games', 4, [[10,1],[1,10],[10,1],[1,10],[10,1]]);
+    ok(r.done, 'a fixed run ends');
+    eq(r.played, 4, 'after exactly that many games');
+    eq(r.sr.games.length, 4, 'and records that many');
+  }
+  {
+    /* a drawn game advances nobody - crediting both let a best-of-3 end 2-2 */
+    const r = run('games', 2, [[5,5],[7,7]]);
+    ok(r.done, 'ties do not stall a fixed run');
+    eq(r.standing.map(x => x.wins), [0, 0], 'a drawn game is a win for neither');
+    eq(r.standing.map(x => x.pts), [12, 12], 'but the points still count');
+    ok(r.sr.games.every(g => g.drawn), 'and both games are marked drawn');
+  }
+  {
+    const r = run('bo', 3, [[5,5],[5,5],[5,5]]);
+    eq(r.played, 3, 'a best-of-3 of nothing but draws still stops at three');
+    ok(r.done, 'and ends');
+    eq(r.standing.map(x => x.wins), [0, 0], 'with nobody having won one');
+  }
+  {
+    const r = run('bo', 5, [[10,1],[10,1],[10,1]]);
+    eq(r.sr.games[0].scores.map(s => s.pts), [10, 1], 'each game keeps its own scores');
+    eq(r.sr.games.length, 3, 'and every game played is kept');
+  }
+}
+{
+  /* series fields ride on ordinary game records, so nothing else has to change */
+  app.setRecords([
+    {ts: 1, sid: 900, sno: 1, smode: 'bo', sn: 3, range: '2024', label: 'Hits', players: [
+      {name: 'A', pts: 40, picks: 2, strikes: 0, fouls: 0, ranks: [20, 20], win: true},
+      {name: 'B', pts: 10, picks: 1, strikes: 1, fouls: 0, ranks: [10], win: false}]},
+    {ts: 2, sid: 900, sno: 2, smode: 'bo', sn: 3, range: '2024', label: 'Hits', players: [
+      {name: 'A', pts: 30, picks: 1, strikes: 0, fouls: 0, ranks: [30], win: true},
+      {name: 'B', pts: 20, picks: 1, strikes: 0, fouls: 0, ranks: [20], win: false}]},
+    {ts: 3, range: '1998', label: 'Runs', players: [                       // a loose game
+      {name: 'A', pts: 5, picks: 1, strikes: 0, fouls: 0, ranks: [5], win: true}]},
+  ]);
+  const car = app.careerStats().find(r => r.name === 'A');
+  eq(car.games, 3, 'career stats count series games and loose games alike');
+  eq(car.pts, 75, 'and sum them all');
+  const P = app.profileFor('A');
+  eq(P.games, 3, 'profiles are unaffected by the series fields');
+  app.renderSeriesHistory();
+  const html = app.__els.get('ser-history').innerHTML;
+  ok(/Best of 3/.test(html), 'series history names the format', html.slice(0, 80));
+  ok(/2 games/.test(html), 'and how many games it ran');
+  ok(/A 2/.test(html), 'and the winner with their tally');
+  ok(!/Runs/.test(html), 'the loose game is not shown as a series');
 }
 
 group('records and profile');

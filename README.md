@@ -33,9 +33,18 @@ working with no signal.
 
 ## Records
 
-Stored in `localStorage`, per device and per browser. To combine records from a
-phone and a laptop, use **Export records** on one and **Import records** on the
-other — merging is by game timestamp, so importing twice is harmless.
+Stored in `localStorage`, per device and per browser. There is no account and no
+server, so nothing you play is sent anywhere — which also means records do not
+follow you between devices on their own. To move them: **Export records** on one,
+AirDrop or email yourself the file, **Import records** on the other. Merging is
+by game timestamp, so importing twice is harmless and neither side loses
+anything.
+
+## Series
+
+Play a single game or a series: best of N, first to N wins, first to N points,
+or a fixed number of games. The era and the category can be re-rolled between
+games. Series show up in Records with their format, length and result.
 
 ## The data
 

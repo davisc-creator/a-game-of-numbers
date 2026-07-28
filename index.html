@@ -81,7 +81,35 @@
     </div>
 
     <div class="card">
-      <h2>Length</h2>
+      <h2>Format</h2>
+      <div class="pill-set" id="fmt-set">
+        <button class="pill" data-fmt="single" aria-pressed="true">Single game</button>
+        <button class="pill" data-fmt="series">Series</button>
+      </div>
+      <div id="series-opts" class="hidden">
+        <div class="grp-label">How it ends</div>
+        <div class="pill-set" id="smode-set">
+          <button class="pill" data-smode="bo" aria-pressed="true">Best of</button>
+          <button class="pill" data-smode="wins">First to N wins</button>
+          <button class="pill" data-smode="points">First to N points</button>
+          <button class="pill" data-smode="games">Fixed number</button>
+        </div>
+        <div class="years">
+          <label for="s-n" id="s-n-label">Games</label>
+          <input type="number" id="s-n" inputmode="numeric" min="1" max="999" value="7">
+        </div>
+        <p class="hint" id="s-n-note"></p>
+        <div class="grp-label">Change between games</div>
+        <div class="pill-set" id="svary-set">
+          <button class="pill" data-vary="cat" aria-pressed="false">Random category</button>
+          <button class="pill" data-vary="era" aria-pressed="false">Random era</button>
+        </div>
+        <p class="hint">Leave both off and every game uses the era and category you picked above.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Rounds per game</h2>
       <div class="pill-set" id="rounds-set">
         <button class="pill" data-rounds="8">8 rounds</button>
         <button class="pill" data-rounds="12" aria-pressed="true">12 rounds</button>
@@ -124,6 +152,11 @@
       <p class="hint" id="rec-tap"></p>
     </div>
     <div class="card">
+      <h2>Series</h2>
+      <div id="ser-history"></div>
+      <p class="hint" id="ser-hist-empty">No series played yet.</p>
+    </div>
+    <div class="card">
       <h2>Past games</h2>
       <div id="hist-list"></div>
       <p class="hint" id="hist-empty">Nothing played yet.</p>
@@ -135,6 +168,11 @@
     </div>
     <input type="file" id="rec-file" accept="application/json" class="hidden">
     <p class="hint" id="rec-msg"></p>
+    <p class="hint">Records live on this device. There's no account and no server &mdash;
+    nothing you play here is sent anywhere. To get them onto your phone: <strong>Export
+    records</strong> here, AirDrop or email yourself the file, then <strong>Import
+    records</strong> there. Merging is by game time, so importing the same file twice
+    is harmless and neither side loses anything.</p>
   </section>
 
   <!-- PROFILE -->
@@ -167,6 +205,23 @@
       <h2>Signature picks</h2>
       <div id="prof-sig" class="mono"></div>
       <p class="hint" id="prof-sig-note"></p>
+    </div>
+  </section>
+
+  <!-- SERIES -->
+  <section id="screen-series" class="hidden">
+    <div class="card">
+      <h2 id="ser-head">&nbsp;</h2>
+      <p class="hint" id="ser-sub"></p>
+      <div id="ser-table"></div>
+    </div>
+    <div class="card">
+      <h2>Games so far</h2>
+      <div id="ser-games"></div>
+    </div>
+    <div class="row">
+      <button class="btn shrink" id="ser-next">Next game</button>
+      <button class="btn ghost shrink" id="ser-done">End series</button>
     </div>
   </section>
 
