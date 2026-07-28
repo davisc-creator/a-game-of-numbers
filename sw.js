@@ -1,5 +1,5 @@
 /* Cache the app shell up front, then any data file the moment it's first used. */
-const SHELL = 'otb-shell-v1';
+const SHELL = 'otb-shell-v2';
 const DATA  = 'otb-data-v1';
 const FILES = ['./', './index.html', './styles.css', './app.js',
                './manifest.webmanifest', './icon.svg'];
@@ -15,12 +15,24 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  const isData = url.pathname.includes('/data/');
+  /* Data files never change once generated, so cache-first is right for them and is
+     what makes offline play work. The shell is the opposite: cache-first pinned every
+     installed browser to whatever app.js shipped the day it installed. */
+  if (url.pathname.includes('/data/')) {
+    e.respondWith(
+      caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+        const copy = res.clone();
+        caches.open(DATA).then(c => c.put(e.request, copy));
+        return res;
+      }))
+    );
+    return;
+  }
   e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+    fetch(e.request).then(res => {
       const copy = res.clone();
-      caches.open(isData ? DATA : SHELL).then(c => c.put(e.request, copy));
+      caches.open(SHELL).then(c => c.put(e.request, copy));
       return res;
-    }).catch(() => hit))
+    }).catch(() => caches.match(e.request))
   );
 });

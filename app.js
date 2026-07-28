@@ -154,7 +154,7 @@ function startGame(){
     rangeId: S.rangeId, post: S.post, cat: S.catId,
     label: pool.label, abbr: pool.abbr, pool,
     players: S.seats.map((n, i) => ({name: (n.trim() || `Drafter ${i+1}`),
-      pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: []})),
+      pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: [], picked: []})),
     round: 0, pos: 0, maxRounds: S.rounds, log: [], saved: false,
   };
   show('game');
@@ -226,6 +226,7 @@ function score(e){
   const p = S.G.players[seat()];
   e.drafted = true; e.by = p.name;
   p.pts += e.rank; p.picks++; p.ranks.push(e.rank);
+  p.picked.push({n: e.name, r: e.rank});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val});
   clearMsg();
   setPlate(`${p.name} scores`, String(e.rank), `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr}`, 'good');
@@ -272,8 +273,10 @@ function finish(){
     G.saved = true;
     const best = Math.max(...G.players.map(p => p.pts));
     RECORDS.push({ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
+      depth: G.pool.depth,
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
-        picks: p.picks, fouls: p.fouls, ranks: p.ranks, win: p.pts === best}))});
+        picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
+        win: p.pts === best}))});
     saveRecords();
   }
   const ranked = [...G.players].sort((a, b) => b.pts - a.pts);
@@ -413,7 +416,7 @@ function renderRecords(){
   const rows = careerStats().sort(SORTERS[S.recSort]);
   $('rec-empty').classList.toggle('hidden', rows.length > 0);
   $('rec-list').innerHTML = rows.map((r, i) => `
-    <div class="rec ${i === 0 ? 'lead' : ''}">
+    <div class="rec tappable ${i === 0 ? 'lead' : ''}" data-who="${esc(r.name)}" role="button" tabindex="0">
       <div class="rec-head">
         <div class="pos">${i+1}</div>
         <div class="nm">${esc(r.name)}</div>
@@ -427,6 +430,12 @@ function renderRecords(){
         <div><b>${r.fouls}</b><span>fouls</span></div>
       </div>
     </div>`).join('');
+  $('rec-list').querySelectorAll('[data-who]').forEach(el => {
+    const open = () => renderProfile(el.dataset.who);
+    el.onclick = open;
+    el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); } };
+  });
+  $('rec-tap').textContent = rows.length ? 'Tap anyone for their full breakdown.' : '';
   $('rec-key').textContent = rows.length
     ? 'Hit rate is picks that landed. Depth is the average rank of those picks \u2014 higher means further down the list, which is the harder knowledge.'
     : '';
@@ -444,8 +453,108 @@ function renderRecords(){
   }).join('');
 }
 
+/* --------------------------------------------------------------- profile */
+const DEPTH_BUCKETS = [[1,25,'1\u201325'], [26,50,'26\u201350'], [51,100,'51\u2013100'],
+                       [101,200,'101\u2013200'], [201,350,'201\u2013350'], [351,1e9,'351+']];
+
+function profileFor(name){
+  const key = name.trim().toLowerCase();
+  const mine = RECORDS.filter(g => (g.players||[]).some(p => (p.name||'').trim().toLowerCase() === key));
+  const P = {name, games: mine.length, wins: 0, pts: 0, picks: 0, strikes: 0, fouls: 0,
+             ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map()};
+  for (const g of mine){
+    const me = g.players.find(p => (p.name||'').trim().toLowerCase() === key);
+    const ranks = (me.picked && me.picked.length) ? me.picked.map(x => x.r) : (me.ranks || []);
+    if (me.win) P.wins++;
+    P.pts += me.pts||0; P.picks += me.picks||0; P.strikes += me.strikes||0; P.fouls += me.fouls||0;
+    P.ranks.push(...ranks);
+
+    const bump = (map, k, label) => {
+      let e = map.get(k);
+      if (!e){ e = {label, games:0, ranks:[], picks:0, strikes:0}; map.set(k, e); }
+      e.games++; e.ranks.push(...ranks); e.picks += me.picks||0; e.strikes += me.strikes||0;
+      return e;
+    };
+    bump(P.cats, g.cat, (g.label || g.cat) + (g.post ? ' (post)' : ''));
+    bump(P.eras, g.range || '?', g.range || 'Unknown');
+
+    for (const o of g.players){
+      const ok = (o.name||'').trim().toLowerCase();
+      if (ok === key) continue;
+      let h = P.h2h.get(ok);
+      if (!h){ h = {name: o.name.trim(), games:0, ahead:0, behind:0, tied:0, margin:0}; P.h2h.set(ok, h); }
+      h.games++;
+      if (me.pts > o.pts) h.ahead++; else if (me.pts < o.pts) h.behind++; else h.tied++;
+      h.margin += (me.pts||0) - (o.pts||0);
+    }
+    for (const pk of (me.picked || []))
+      P.sig.set(pk.n, (P.sig.get(pk.n) || 0) + 1);
+  }
+  const avg = a => a.length ? a.reduce((x,y) => x+y, 0) / a.length : 0;
+  P.ppg = P.games ? P.pts / P.games : 0;
+  P.hit = (P.picks + P.strikes) ? P.picks / (P.picks + P.strikes) : 0;
+  P.depth = avg(P.ranks);
+  P.deepest = P.ranks.length ? Math.max(...P.ranks) : 0;
+  const shape = m => [...m.values()].map(e => ({...e, depth: avg(e.ranks),
+    hit: (e.picks+e.strikes) ? e.picks/(e.picks+e.strikes) : 0}))
+    .filter(e => e.ranks.length).sort((a,b) => b.depth - a.depth);
+  P.catList = shape(P.cats);
+  P.eraList = shape(P.eras);
+  P.h2hList = [...P.h2h.values()].sort((a,b) => b.games - a.games);
+  P.sigList = [...P.sig.entries()].filter(([,n]) => n > 1).sort((a,b) => b[1] - a[1]).slice(0, 10);
+  return P;
+}
+
+function renderProfile(name){
+  const P = profileFor(name);
+  $('prof-name').textContent = P.name;
+  $('prof-top').innerHTML = [
+    [P.games, 'games'], [P.wins, 'wins'], [P.ppg.toFixed(1), 'pts/game'],
+    [Math.round(P.hit*100) + '%', 'hit rate'], [P.depth ? P.depth.toFixed(0) : '\u2014', 'avg depth'],
+  ].map(([v,l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('');
+
+  const counts = DEPTH_BUCKETS.map(([lo,hi]) => P.ranks.filter(r => r >= lo && r <= hi).length);
+  const max = Math.max(1, ...counts);
+  $('prof-hist').innerHTML = P.ranks.length
+    ? DEPTH_BUCKETS.map(([,,lab], i) => `
+      <div class="bar-row">
+        <div class="lab">${lab}</div>
+        <div class="track"><div class="fill" style="width:${counts[i]/max*100}%"></div></div>
+        <div class="n">${counts[i]}</div>
+      </div>`).join('')
+    : '<p class="hint">No successful picks yet.</p>';
+
+  const brk = list => list.map(e => `
+    <div class="brk">
+      <div class="t">${esc(e.label)}</div>
+      <div class="s">${e.games} game${e.games===1?'':'s'}</div>
+      <div class="v">${e.depth.toFixed(0)}</div>
+    </div>`).join('');
+  $('prof-cats').innerHTML = P.catList.length ? brk(P.catList) : '<p class="hint">Nothing yet.</p>';
+  $('prof-cats-note').textContent = P.catList.length > 1
+    ? `Strongest: ${P.catList[0].label} at ${P.catList[0].depth.toFixed(0)} average. Weakest: ${P.catList[P.catList.length-1].label} at ${P.catList[P.catList.length-1].depth.toFixed(0)}.`
+    : 'Play a few categories and the split shows up here.';
+  $('prof-eras').innerHTML = P.eraList.length ? brk(P.eraList) : '<p class="hint">Nothing yet.</p>';
+
+  $('prof-h2h').innerHTML = P.h2hList.length ? P.h2hList.map(h => `
+    <div class="brk">
+      <div class="t">vs ${esc(h.name)}</div>
+      <div class="s">${h.games} together</div>
+      <div class="v">${h.ahead}\u2013${h.behind}${h.tied?'\u2013'+h.tied:''}</div>
+    </div>`).join('') : '<p class="hint">No shared games yet.</p>';
+  $('prof-h2h-note').textContent = P.h2hList.length
+    ? 'Wins\u2013losses head to head, counting who finished higher in each shared game.'
+    : '';
+
+  $('prof-sig').innerHTML = P.sigList.length
+    ? P.sigList.map(([n,c]) => `${String(c).padStart(2,' ')}\u00d7  ${esc(n)}`).join('<br>')
+    : 'No repeats yet.';
+  $('prof-sig-note').textContent = P.sigList.length ? 'Players he keeps going back to.' : '';
+  show('profile');
+}
+
 /* ------------------------------------------------------------------- nav */
-const SCREENS = ['setup','rules','records','game','over'];
+const SCREENS = ['setup','rules','records','profile','game','over'];
 function show(name){
   SCREENS.forEach(s => $('screen-' + s).classList.toggle('hidden', s !== name));
   ['setup','rules','records'].forEach(s => {
@@ -459,6 +568,7 @@ function wire(){
   $('nav-rules').onclick   = () => show('rules');
   $('nav-records').onclick = () => { renderRecords(); show('records'); };
   $('to-records').onclick  = () => { renderRecords(); show('records'); };
+  $('prof-back').onclick   = () => { renderRecords(); show('records'); };
   $('again').onclick       = () => show('setup');
 
   $('add-seat').onclick = () => { if (S.seats.length < 4){ S.seats.push(''); renderSeats(); } };

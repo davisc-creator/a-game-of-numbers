@@ -102,6 +102,7 @@
       <div id="rec-list"></div>
       <p class="hint" id="rec-empty">No games finished yet.</p>
       <p class="hint" id="rec-key"></p>
+      <p class="hint" id="rec-tap"></p>
     </div>
     <div class="card">
       <h2>Past games</h2>
@@ -115,6 +116,39 @@
     </div>
     <input type="file" id="rec-file" accept="application/json" class="hidden">
     <p class="hint" id="rec-msg"></p>
+  </section>
+
+  <!-- PROFILE -->
+  <section id="screen-profile" class="hidden">
+    <button class="btn ghost small" id="prof-back" style="margin-bottom:14px">&larr; All records</button>
+    <div class="card">
+      <h2 id="prof-name">&nbsp;</h2>
+      <div class="rec-stats" id="prof-top"></div>
+    </div>
+    <div class="card">
+      <h2>How deep he goes</h2>
+      <div id="prof-hist"></div>
+      <p class="hint">Where his correct picks landed on the board. Rightward is harder knowledge.</p>
+    </div>
+    <div class="card">
+      <h2>By category</h2>
+      <div id="prof-cats"></div>
+      <p class="hint" id="prof-cats-note"></p>
+    </div>
+    <div class="card">
+      <h2>By era</h2>
+      <div id="prof-eras"></div>
+    </div>
+    <div class="card">
+      <h2>Head to head</h2>
+      <div id="prof-h2h"></div>
+      <p class="hint" id="prof-h2h-note"></p>
+    </div>
+    <div class="card">
+      <h2>Signature picks</h2>
+      <div id="prof-sig" class="mono"></div>
+      <p class="hint" id="prof-sig-note"></p>
+    </div>
   </section>
 
   <!-- GAME -->
