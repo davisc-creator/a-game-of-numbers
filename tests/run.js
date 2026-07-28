@@ -113,6 +113,14 @@ const FIX = () => ({
         ['Alex Gonzalez', 40], ['Alex Gonzalez', 40],
         ['Willie Mays', 30], ['Barry Bonds', 20], ['Bobby Bonds', 10],
       ],
+      /* row index -> [team, career span]; only namesakes carry it */
+      who: {'0': ['DET', '1953-1962'], '1': ['NYN', '1957-1974'],
+            '2': ['TOR', '1994-2006'], '3': ['FLO', '1998-2014']},
+    },
+    /* same shape, but the two namesakes are indistinguishable */
+    dupblind: {
+      cols: ['H'],
+      rows: [['Smith', 50], ['Smith', 45], ['Willie Mays', 30]],
     },
   },
   cats: {
@@ -121,6 +129,7 @@ const FIX = () => ({
     bat_hr:  {side: 'bat', col: 'HR',   label: 'Home Runs', abbr: 'HR',   depth: 3, dir: 'desc'},
     pit_em:  {side: 'pit', col: 'ERAm', label: 'ERA-',      abbr: 'ERA-', depth: 2, dir: 'asc'},
     dup_h:   {side: 'dup', col: 'H',    label: 'Dup Hits',  abbr: 'H',    depth: 7, dir: 'desc'},
+    blind_h: {side: 'dupblind', col: 'H', label: 'Blind',   abbr: 'H',    depth: 3, dir: 'desc'},
   },
 });
 
@@ -217,24 +226,39 @@ group('resolve');
 group('players who share a name');
 {
   const G = gameOn(app, 'dup_h', ['A', 'B']);
-  eq(app.resolve('miller').k, 'hit', 'bare last name shared by identical names resolves');
   const r1 = app.resolve('Bob Miller');
-  eq(r1.k, 'hit', 'identical names on the board are draftable, not ambiguous');
-  eq(r1.e.rank, 1, 'the better rank is awarded first');
-  app.score(r1.e); app.__drain();
+  eq(r1.k, 'choose', 'namesakes offer a choice rather than a dead end');
+  eq(r1.list.length, 2, 'both are offered');
+  eq(r1.list.map(e => e.who), [['DET', '1953-1962'], ['NYN', '1957-1974']],
+     'each option carries team and career span');
+  ok(r1.list.every(e => e.who[0] && e.who[1]), 'no option is unlabelled');
+  eq(app.resolve('miller').k, 'choose', 'bare last name reaches the same chooser');
+
+  /* choosing is just scoring the entry the player picked */
+  app.score(r1.list[1]); app.__drain();
+  eq(G.players[0].pts, 2, 'the chosen man scores his own rank, not the better one');
   const r2 = app.resolve('Bob Miller');
-  eq(r2.k, 'hit', 'the namesake is still on the board afterwards');
-  eq(r2.e.rank, 2, 'and is worth his own rank');
+  eq(r2.k, 'hit', 'with one drafted the survivor needs no chooser');
+  eq(r2.e.rank, 1, 'and is the one left standing');
   app.score(r2.e); app.__drain();
   eq(app.resolve('Bob Miller').k, 'taken', 'once both are gone the name reports as taken');
 
-  eq(app.resolve('Alex Gonzalez').k, 'hit', 'identical names tied on value still resolve');
+  eq(app.resolve('Alex Gonzalez').k, 'choose', 'namesakes tied on value still offer a choice');
 
   /* the case a first name genuinely does fix must still ask */
   const amb = app.resolve('bonds');
   eq(amb.k, 'ambiguous', 'different men sharing a last name still ask for a first name');
   eq(amb.list.length, 2, 'and both are offered');
   eq(G.pool.board.filter(e => !e.drafted).every(e => e.zone === 'board'), true, 'board intact');
+}
+{
+  /* no metadata to tell them apart -> asking would be unanswerable, so the
+     better rank is awarded rather than stranding the slots */
+  const G = gameOn(app, 'blind_h', ['A', 'B']);
+  const r = app.resolve('Smith');
+  eq(r.k, 'hit', 'indistinguishable namesakes fall back to awarding');
+  eq(r.e.rank, 1, 'and award the better rank');
+  ok(G.pool.board.every(e => e.who === null), 'no identity data on this board');
 }
 
 group('snake order');
@@ -418,7 +442,7 @@ group('buildPool over every shipped category');
 {
   const files = fs.readdirSync(DATA).filter(f => f.endsWith('.json') && f !== 'manifest.json');
   const bad = [];
-  let built = 0, sharedBoards = 0, sharedSlots = 0;
+  let built = 0, sharedBoards = 0, sharedSlots = 0, chooseable = 0, awarded = 0;
   for (const f of files){
     const d = JSON.parse(fs.readFileSync(path.join(DATA, f), 'utf8'));
     app.S.data = d;
@@ -450,12 +474,26 @@ group('buildPool over every shipped category');
         for (const [name] of shared){
           sharedSlots += seen.get(name);
           const r = app.resolve(name);
-          if (r.k !== 'hit') bad.push(`${f} ${id} "${name}" resolves as ${r.k}, not draftable`);
+          /* either the player is offered the choice, or - when the data cannot
+             tell the namesakes apart - one is awarded outright. Never a dead end. */
+          if (r.k === 'choose') chooseable++;
+          else if (r.k === 'hit') awarded++;
+          else bad.push(`${f} ${id} "${name}" resolves as ${r.k}, not draftable`);
+          /* Lahman has no debut/finalGame for some Negro League players, so an
+             option may carry a team and no span. What must hold is that every
+             option says *something* and no two say the same thing. */
+          if (r.k === 'choose'){
+            const tags = r.list.map(e => (e.who || []).filter(Boolean).join(' '));
+            if (tags.some(t => !t)) bad.push(`${f} ${id} "${name}" offered a blank option`);
+            if (new Set(tags).size !== tags.length)
+              bad.push(`${f} ${id} "${name}" offered two identical options`);
+          }
         }
       }
     }
   }
   console.log(`   (${built} category boards built; ${sharedBoards} carry ${sharedSlots} shared-name slots)`);
+  console.log(`   (${chooseable} contested names offer a choice, ${awarded} auto-awarded for want of identity data)`);
   eq(bad.slice(0, 5), [], 'every shipped category builds a sane, fully draftable board');
 }
 

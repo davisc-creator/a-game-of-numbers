@@ -68,6 +68,16 @@ def load():
 
     names = (ppl.nameFirst.fillna('') + ' ' + ppl.nameLast.fillna('')).str.strip()
     name_of = dict(zip(ppl.playerID, names))
+
+    # Career span, used only to tell namesakes apart in the client.
+    def yr(v):
+        s = str(v)
+        return int(s[:4]) if len(s) >= 4 and s[:4].isdigit() else None
+    span_of = {}
+    for pid, dbt, fin in zip(ppl.playerID, ppl.debut, ppl.finalGame):
+        a, b = yr(dbt), yr(fin)
+        if a:
+            span_of[pid] = str(a) if not b or b == a else f'{a}-{b}'
     for df, cols in ((bat, BAT_NUM), (pit, PIT_NUM), (bpost, BAT_NUM), (ppost, PIT_NUM)):
         for c in cols:
             if c in df.columns:
@@ -76,7 +86,24 @@ def load():
     allstar['yearID'] = allstar.yearID.astype(int)
     awards['yearID']  = awards.yearID.astype(int)
     return dict(bat=bat, pit=pit, bpost=bpost, ppost=ppost, allstar=allstar,
-                awards=awards, name_of=name_of, gpy=tms.groupby('yearID').G.median())
+                awards=awards, name_of=name_of, span_of=span_of,
+                gpy=tms.groupby('yearID').G.median())
+
+
+def teams_in(frames, y0, y1):
+    """playerID -> the team he appeared for most in this range."""
+    best = {}
+    for df in frames:
+        if 'teamID' not in df.columns:
+            continue
+        d = df[(df.yearID >= y0) & (df.yearID <= y1)]
+        if not len(d):
+            continue
+        g = d.groupby(['playerID', 'teamID'], as_index=False).G.sum()
+        for pid, tid, games in zip(g.playerID, g.teamID, g.G):
+            if games > best.get(pid, (None, -1))[1]:
+                best[pid] = (str(tid), games)
+    return {p: t for p, (t, _) in best.items()}
 
 
 def depth_of(values):
@@ -107,7 +134,7 @@ def num(v):
     return int(v) if v == int(v) else round(v, 2)
 
 
-def make_side(agg, cat_defs, name_of, y0, extra_cols=()):
+def make_side(agg, cat_defs, name_of, y0, extra_cols=(), ident=None):
     cols, cats = [], {}
     for cid, col, label, abbr, since in cat_defs:
         if y0 < since or col not in agg.columns:
@@ -124,8 +151,22 @@ def make_side(agg, cat_defs, name_of, y0, extra_cols=()):
     tab = agg[['playerID'] + cols].copy()
     filled = tab[cols].fillna(0)
     tab = tab[(filled != 0).any(axis=1)]
+    pids = list(tab.playerID)
     rows = [[name_of.get(p, p)] + [num(v) for v in vv]
             for p, vv in zip(tab.playerID, tab[cols].fillna(0).values)]
+
+    # Only namesakes need telling apart, so `who` stays small: row index ->
+    # [team, career span]. The client shows it when a typed name is contested.
+    who = {}
+    if ident:
+        seen = {}
+        for r in rows:
+            seen[r[0]] = seen.get(r[0], 0) + 1
+        for i, (pid, r) in enumerate(zip(pids, rows)):
+            if seen[r[0]] > 1:
+                team, span = ident.get(pid, (None, None))
+                if team or span:
+                    who[str(i)] = [team or '', span or '']
 
     for cid, meta in cats.items():
         i = cols.index(meta['col']) + 1
@@ -135,7 +176,10 @@ def make_side(agg, cat_defs, name_of, y0, extra_cols=()):
         meta['depth'] = depth_of(series)
         meta['dir'] = 'asc' if asc else 'desc'
     cats = {k: v for k, v in cats.items() if v.get('depth', 0) > 0}
-    return {'cols': cols, 'rows': rows}, cats
+    side = {'cols': cols, 'rows': rows}
+    if who:
+        side['who'] = who
+    return side, cats
 
 
 def build(D, y0, y1, post=False):
@@ -144,13 +188,18 @@ def build(D, y0, y1, post=False):
     n_seasons = y1 - y0 + 1
     sides, cats = {}, {}
 
+    team_of = teams_in((bat_src, pit_src), y0, y1)
+    span_of = D['span_of']
+    ident = {p: (team_of.get(p), span_of.get(p))
+             for p in set(team_of) | set(span_of)}
+
     b = bat_src[(bat_src.yearID >= y0) & (bat_src.yearID <= y1)]
     if len(b):
         agg = b.groupby('playerID', as_index=False).sum(numeric_only=True)
         agg['TB']  = agg.H + agg.X2B + 2 * agg.X3B + 3 * agg.HR
         agg['XBH'] = agg.X2B + agg.X3B + agg.HR
         agg['B1']  = agg.H - agg.X2B - agg.X3B - agg.HR
-        side, c = make_side(agg, BAT, D['name_of'], y0)
+        side, c = make_side(agg, BAT, D['name_of'], y0, ident=ident)
         if side:
             sides['bat'] = side
             cats.update({k: dict(v, side='bat') for k, v in c.items()})
@@ -171,7 +220,7 @@ def build(D, y0, y1, post=False):
                 agg.loc[agg.IP < min_ip, 'ERAm'] = 0
                 agg['ERAm'] = agg.ERAm.fillna(0)
                 defs = defs + [('pit_era', 'ERAm', f'ERA- (min {min_ip:g} IP)', 'ERA-', 1920)]
-        side, c = make_side(agg, defs, D['name_of'], y0, extra_cols=('IP',))
+        side, c = make_side(agg, defs, D['name_of'], y0, extra_cols=('IP',), ident=ident)
         if side:
             sides['pit'] = side
             cats.update({k: dict(v, side='pit') for k, v in c.items()})
@@ -187,7 +236,7 @@ def build(D, y0, y1, post=False):
                                how='outer')
         if len(tally):
             tally = tally.fillna(0).reset_index()
-            side, c = make_side(tally, AWD, D['name_of'], y0)
+            side, c = make_side(tally, AWD, D['name_of'], y0, ident=ident)
             if side:
                 sides['awd'] = side
                 cats.update({k: dict(v, side='awd') for k, v in c.items()})

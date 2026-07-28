@@ -133,3 +133,8 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .mono{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--chalk-dim)}
 .hint{font-size:15px;color:var(--chalk-dim);margin:6px 0 0}
 .hidden{display:none !important}
+
+/* namesake chooser: one button per candidate, team and years only */
+.choose{display:flex;flex-wrap:wrap;gap:8px}
+.choose .btn{text-align:left}
+.choose .mono{opacity:.8;margin-right:6px}

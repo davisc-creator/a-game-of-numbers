@@ -69,6 +69,13 @@ function buildPool(){
   const ci = side.cols.indexOf(cat.col) + 1;
   const asc = cat.dir === 'asc';
 
+  /* `who` is keyed by original row index and only present for names the file
+     carries more than once. Keying the lookup by row reference survives the
+     filter and sort below, which the index would not. */
+  const who = side.who || {};
+  const whoOf = new Map();
+  side.rows.forEach((r, i) => { if (who[i]) whoOf.set(r, who[i]); });
+
   const scored = side.rows.filter(r => r[ci] > 0)
                           .sort((a, b) => asc ? a[ci] - b[ci] : b[ci] - a[ci]);
   const ranks = [];
@@ -77,9 +84,11 @@ function buildPool(){
 
   const depth = Math.min(cat.depth, scored.length);
   const board = scored.slice(0, depth).map((r, i) =>
-    ({name: r[0], val: r[ci], rank: ranks[i], zone: 'board', drafted: false, by: null}));
+    ({name: r[0], val: r[ci], rank: ranks[i], zone: 'board', drafted: false, by: null,
+      who: whoOf.get(r) || null}));
   const foul = scored.slice(depth, depth + 10).map((r, i) =>
-    ({name: r[0], val: r[ci], rank: ranks[depth + i], zone: 'foul', used: false}));
+    ({name: r[0], val: r[ci], rank: ranks[depth + i], zone: 'foul', used: false,
+      who: whoOf.get(r) || null}));
 
   // everyone else, purely so a strike can still be told what he did
   const off = [];
@@ -113,12 +122,16 @@ function resolve(raw){
     const live = list.filter(e => e.zone === 'board' && !e.drafted);
     if (live.length === 1) return {k: 'hit', e: live[0]};
     /* Different men who share a name - the all-time board carries fifteen
-       Smiths. "Use a first name" only helps when the full names differ; when
-       they are identical the prompt is unanswerable and the slots become
+       Smiths. "Use a first name" only helps when the full names differ. When
+       they are identical, offer the choice if the data can actually tell them
+       apart; otherwise the prompt is unanswerable and the slots would be
        undraftable, so award the better rank and leave the namesake up. */
     if (live.length > 1){
-      const same = new Set(live.map(e => norm(e.name))).size === 1;
-      return same ? {k: 'hit', e: bestOf(live)} : {k: 'ambiguous', list: live};
+      if (new Set(live.map(e => norm(e.name))).size > 1) return {k: 'ambiguous', list: live};
+      const tags = live.map(e => (e.who || []).join('|')).filter(Boolean);
+      if (tags.length === live.length && new Set(tags).size === live.length)
+        return {k: 'choose', list: live};
+      return {k: 'hit', e: bestOf(live)};
     }
     const taken = list.filter(e => e.zone === 'board');
     if (taken.length)      return {k: 'taken', e: taken[0]};
@@ -206,10 +219,36 @@ function submitGuess(){
     setMsg(`Too many matches: ${r.list.map(e => e.name).join(', ')}. Use a first name \u2014 no strike.`, 'warn');
     box.value = ''; focusGuess(); return;
   }
+  if (r.k === 'choose') return askChoose(r.list);
   if (r.k === 'suggest') return askConfirm(r.e, raw);
   if (r.k === 'hit')  return score(r.e);
   if (r.k === 'foul') return foul(r.e);
   return strike(raw, r.k === 'off' || r.k === 'usedfoul' ? r.e : null);
+}
+
+/* Two different men, one name. Team and career span are the only things shown -
+   a rank or a stat line here would hand over the answer the game is asking for. */
+function askChoose(list){
+  $('confirm-slot').innerHTML = `
+    <div class="msg warn" style="margin-top:12px">
+      <div style="margin-bottom:8px">More than one <strong>${esc(list[0].name)}</strong> played. Which?</div>
+      <div class="choose">
+        ${list.map((e, i) => `<button class="btn small" data-pick="${i}">
+             <span class="mono">${esc(e.who[0] || '—')}</span> ${esc(e.who[1] || '')}
+           </button>`).join('')}
+        <button class="btn ghost small" data-pick="none">Neither</button>
+      </div>
+    </div>`;
+  $('confirm-slot').querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
+    const v = el.dataset.pick;
+    clearConfirm();
+    if (v === 'none'){
+      setMsg('Pick again — no strike.', 'warn');
+      $('guess').value = ''; focusGuess(); return;
+    }
+    const e = list[+v];
+    e.drafted ? (setMsg('Already off the board.', 'warn'), focusGuess()) : score(e);
+  });
 }
 
 function askConfirm(e, raw){

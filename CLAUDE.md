@@ -34,7 +34,10 @@ data files; Jekyll must not process them). Tests pass.
 pwd && ls index.html app.js sw.js data/manifest.json tests/run.js
 ```
 
-Consolidating to one folder is still open.
+Consolidating to one folder is still open. **`~/Desktop` is iCloud-synced** —
+rewriting the whole `data/` folder at once made iCloud leave 106 `"<name> 2.json"`
+conflict copies behind. After any bulk data regeneration, run
+`find data -name "* 2.json" -delete` and check the file count before committing.
 
 **Remaining:** push and enable Pages (Settings → Pages → Deploy from a branch → `main` /
 root). Target URL: `https://<user>.github.io/a-game-of-numbers/`.
@@ -95,6 +98,12 @@ turn a column into a leaderboard.
 app.js sorts a column, assigns competition ranks, cuts at `depth`, takes the
 next ten as the foul band, and indexes everyone else for lookup.
 
+A side may also carry `who`: `{"<row index>": ["<team>", "<career span>"]}`,
+present only for names the file holds more than once. It exists so the client
+can tell namesakes apart — see the data caveats. `buildPool` keys its lookup by
+row *reference*, not index, because the index does not survive the filter and
+sort. Adding 5,530 of these entries across the set cost 0.14 MB.
+
 Full tables ship deliberately — the game tells you a struck-out guess's real
 value and rank, which needs every player, not just the ranked ones.
 
@@ -139,8 +148,14 @@ Jr./Sr., resolves bare last names when only one board player matches, handles
 - **Different men share a name.** 1,236 of the 7,331 category boards carry at
   least one repeated name — fifteen distinct players called "Smith" on the
   all-time board, two Alex Gonzalezes in 1998. These are not duplicate rows and
-  must not be merged. `resolve` awards the better rank when the full names are
-  identical and leaves the namesake on the board.
+  must not be merged. `resolve` returns `k: 'choose'` and the player picks from
+  a list showing team and career span. Where Lahman cannot tell the namesakes
+  apart (8 cases in the whole set) it awards the better rank instead, because
+  asking an unanswerable question would strand the slots.
+- **The chooser must never show a rank or a stat.** Team and career span only.
+  Anything else hands over the answer the game is asking for. This is also why
+  there is no general autocomplete: suggesting board names as you type would
+  turn the draft into reading the leaderboard.
 - **Data ends at 2025.** Lahman has no 2026.
 
 Regenerating data needs `pip install pandas pyreadr` and the Lahman tarball
