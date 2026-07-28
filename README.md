@@ -12,7 +12,7 @@ the browser — no server, no accounts, no build step.
 
 The app fetches JSON, so `file://` will not work. Serve the folder:
 
-    cd off-the-board
+    cd a-game-of-numbers
     python3 -m http.server 8000
 
 Then open <http://localhost:8000>.

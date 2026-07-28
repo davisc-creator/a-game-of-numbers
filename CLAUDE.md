@@ -23,11 +23,11 @@ step, no framework, no dependencies. It must stay that way.
 Get this deployed to GitHub Pages. Still not pushed as of 2026-07-28.
 
 **Done already:** the stray `~/.git` is gone. The repo exists at
-`~/Projects/off-the-board` on branch `main` with `.nojekyll` committed (247
+`~/Projects/a-game-of-numbers` on branch `main` with `.nojekyll` committed (247
 data files; Jekyll must not process them). Tests pass.
 
 **Two working copies exist** — `~/Desktop/app` is where edits happen and
-`~/Projects/off-the-board` is the git repo. They are byte-identical apart from
+`~/Projects/a-game-of-numbers` is the git repo. They are byte-identical apart from
 `.git`. Verify which tree you are in before running any git command:
 
 ```bash
@@ -37,7 +37,7 @@ pwd && ls index.html app.js sw.js data/manifest.json tests/run.js
 Consolidating to one folder is still open.
 
 **Remaining:** push and enable Pages (Settings → Pages → Deploy from a branch → `main` /
-root). Target URL: `https://<user>.github.io/off-the-board/`.
+root). Target URL: `https://<user>.github.io/a-game-of-numbers/`.
 
 **Do not run `gh auth login`, enter GitHub credentials, or create a personal
 access token.** Authentication is the user's to perform. Prepare everything up
