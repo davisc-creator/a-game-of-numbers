@@ -314,6 +314,36 @@ group('scoring and strikes');
   eq(p.strikes, 2, 'a foul at two strikes is free');
 }
 
+group('the cut is always on screen');
+{
+  /* a pick worth 153 is only legitimate if the list runs at least 153 deep,
+     and the player has to be able to see that while playing */
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  eq(app.__els.get('g-depth').textContent, String(G.pool.depth),
+     'the depth is rendered in the header, not just on the opening plate');
+  app.score(G.pool.board.find(e => e.rank === 3)); app.__drain();
+  const sub = app.__els.get('plate-sub').innerHTML || app.__els.get('plate-sub').textContent;
+  ok(/3rd of 6/.test(sub), 'a scored pick says where it landed in the list', sub);
+  eq(app.__els.get('g-depth').textContent, '6', 'and the header still shows the cut after a pick');
+}
+{
+  const G = gameOn(app, 'bat_h', ['A', 'B']);      // depth 3, foul band beyond
+  const p = G.players[0];
+  p.strikes = 2;
+  app.foul(G.pool.foul[0]); app.__drain();
+  const msg = app.__els.get('msg-slot').innerHTML;
+  ok(/stops at 3/.test(msg), 'a foul names the cut it fell past', msg);
+  eq(p.strikes, 2, 'and is still free at two strikes');
+}
+{
+  /* the invariant behind all of it, on the fixture boards */
+  for (const cat of ['bat_h', 'bat_h6', 'bat_hr', 'dup_h']){
+    const P = poolFor(app, cat);
+    ok(P.board.every(e => e.rank <= P.depth), `${cat}: no board rank past the cut`);
+    ok(P.foul.every(e => e.rank > P.depth), `${cat}: no foul rank inside the cut`);
+  }
+}
+
 group('records and profile');
 {
   app.setRecords([

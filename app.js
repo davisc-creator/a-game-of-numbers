@@ -464,7 +464,8 @@ function score(e){
   p.picked.push({n: e.name, r: e.rank});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val});
   clearMsg();
-  setPlate(`${p.name} scores`, String(e.rank), `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr}`, 'good');
+  setPlate(`${p.name} scores`, String(e.rank),
+    `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 280);
 }
@@ -478,8 +479,8 @@ function foul(f){
   clearMsg();
   setPlate('Foul ball', 'FOUL',
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
-  setMsg(free ? 'Two strikes \u2014 the foul is free. Turn passes.'
-              : `Just off the board. Strike ${p.strikes}. Turn passes.`, 'warn');
+  setMsg(free ? `The list stops at ${S.G.pool.depth} \u2014 two strikes, so the foul is free. Turn passes.`
+              : `The list stops at ${S.G.pool.depth}. Strike ${p.strikes}. Turn passes.`, 'warn');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 420);
 }
@@ -533,6 +534,10 @@ function finish(){
 /* ---------------------------------------------------------------- render */
 function renderGame(){
   const G = S.G;
+  /* The cut has to stay on screen. It used to appear once on the opening plate
+     and then get overwritten by the first pick, so mid-game there was no way to
+     tell whether the man you just named was inside the list or past it. */
+  $('g-depth').textContent = String(G.pool.depth);
   $('g-round').textContent = G.maxRounds ? `${Math.min(G.round+1, G.maxRounds)}/${G.maxRounds}` : String(G.round+1);
   $('g-left').textContent = openLeft();
   const t = seat();

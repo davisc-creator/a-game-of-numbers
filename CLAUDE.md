@@ -132,6 +132,12 @@ value and rank, which needs every player, not just the ranked ones.
 - Already-drafted names and ambiguous last names cost nothing and re-prompt.
 - Near misses get one "did you mean?" confirmation before a strike lands.
 
+**The cut has to stay visible.** The depth is in the game header (`g-depth`) and
+every scored pick says "Nth of DEPTH". It used to appear only on the opening
+plate, where the first pick overwrote it — which reads as a bug the moment a
+deep list pays out 153 points and nothing on screen says the list runs 500 deep.
+The rank *is* the score by design; the boundary being invisible was the defect.
+
 Name matching (`norm`, `resolve` in app.js) strips accents, punctuation and
 Jr./Sr., resolves bare last names when only one board player matches, handles
 "first-initial lastname", and falls back to Levenshtein distance.
