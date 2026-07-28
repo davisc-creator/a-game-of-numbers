@@ -1,4 +1,4 @@
-/* Off the Board - standalone. No server, no accounts; data is static JSON. */
+/* A Game of Numbers - standalone. No server, no accounts; data is static JSON. */
 
 const S = {
   manifest: null, data: null,
@@ -106,15 +106,24 @@ function resolve(raw){
   if (!q) return {k: 'empty'};
   const P = S.G.pool;
 
+  const bestOf = l => l.reduce((a, b) => (a.rank <= b.rank ? a : b));
+
   const pick = list => {
     if (!list || !list.length) return null;
     const live = list.filter(e => e.zone === 'board' && !e.drafted);
     if (live.length === 1) return {k: 'hit', e: live[0]};
-    if (live.length > 1)   return {k: 'ambiguous', list: live};
+    /* Different men who share a name - the all-time board carries fifteen
+       Smiths. "Use a first name" only helps when the full names differ; when
+       they are identical the prompt is unanswerable and the slots become
+       undraftable, so award the better rank and leave the namesake up. */
+    if (live.length > 1){
+      const same = new Set(live.map(e => norm(e.name))).size === 1;
+      return same ? {k: 'hit', e: bestOf(live)} : {k: 'ambiguous', list: live};
+    }
     const taken = list.filter(e => e.zone === 'board');
     if (taken.length)      return {k: 'taken', e: taken[0]};
     const f = list.filter(e => e.zone === 'foul' && !e.used);
-    if (f.length)          return {k: 'foul', e: f[0]};
+    if (f.length)          return {k: 'foul', e: bestOf(f)};
     const off = list.filter(e => e.zone === 'off');
     if (off.length){
       off.sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
@@ -607,7 +616,7 @@ function wire(){
     const blob = new Blob([JSON.stringify(RECORDS)], {type: 'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `off-the-board-records-${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `a-game-of-numbers-records-${new Date().toISOString().slice(0,10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
   };
   $('rec-import').onclick = () => $('rec-file').click();

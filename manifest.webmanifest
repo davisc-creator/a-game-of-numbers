@@ -1,6 +1,6 @@
 {
-  "name": "Off the Board",
-  "short_name": "Off the Board",
+  "name": "A Game of Numbers",
+  "short_name": "Numbers",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#142C24",

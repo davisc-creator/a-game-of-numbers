@@ -1,4 +1,4 @@
-# Off the Board
+# A Game of Numbers
 
 A baseball leaderboard snake draft. Pick an era and a stat, take turns naming
 players, score their rank. Deep cuts pay more than obvious ones.
