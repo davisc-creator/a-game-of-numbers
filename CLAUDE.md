@@ -120,12 +120,18 @@ value and rank, which needs every player, not just the ranked ones.
 ## Rules the code implements
 
 - Snake draft, 2–4 players, pass-and-play on one device.
-- A correct pick scores that player's rank. Rank 137 is worth 137 points.
+- **Rank 1–100 scores its own rank.** Rank 87 is worth 87 points.
+- **Rank 101–110 is the foul band.** Costs a strike below two, free at two.
+  Either way the turn ends; each of the ten only works once.
+- **Rank 111 and beyond is a strike**, however good the player was. He is still
+  in the pool and still reported — "he was 153rd" — because seeing how far off
+  you were is the point. He simply cannot be drafted and cannot score.
+- The cut is by **rank, not list position**, because ties share a rank. Sixty
+  men tied at 50 all score 50; the hundredth of them does not fall into the
+  fouls. `SCORE_TO` and `FOUL_TO` at the top of app.js are the only place this
+  lives.
 - Drafted players leave the shared pool for everyone.
 - **Ties share a rank.** Two players with equal totals score the same.
-- **Foul ball:** naming one of the ten players just past the cut costs a strike
-  if you have fewer than two, and is free at two strikes. Either way the turn
-  ends. Each of the ten only works once.
 - **A strike still reports the truth** — the player's actual value and rank, or
   that he had none in this era, or that he did not play in it.
 - Three strikes ends that person's drafting; everyone else continues.
@@ -146,8 +152,14 @@ Jr./Sr., resolves bare last names when only one board player matches, handles
 
 ## Data caveats — do not silently "fix" these
 
-- **Depth varies by list.** 1920 had 116 players with a home run; 2024 had 453.
-  Lists run 500 deep only where that is meaningful. Never hardcode 100 or 500.
+- **Depth varies by list, and is not the scoring cut.** 1920 had 116 players
+  with a home run; 2024 had 453. `cat.depth` says how far a list is *ranked*,
+  which is what lets a strike report "he was 153rd". It has nothing to do with
+  what scores — that is a flat top 100 (see the rules above). An earlier version
+  of this brief said "never hardcode 100 or 500" and the code cut the board at
+  `cat.depth`, which meant a 500-deep list paid out 500-point picks. The owner
+  corrected that on 2026-07-28: the cut is 100 everywhere. Do not wire the two
+  concepts back together.
 - **Four categories are era-gated** for real data-coverage reasons: GIDP from
   1940, Caught Stealing from 1951, Intentional Walks from 1955. Awards start
   when the award did — All-Star 1933, Cy Young 1956, Gold Glove 1957, Silver

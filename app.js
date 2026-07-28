@@ -5,6 +5,10 @@ const S = {
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
   seats: ['', ''], rounds: 12, G: null, recSort: 'ppg',
 };
+/* The scoring rule, and the only place it lives. Rank 1-100 scores its own
+   rank, 101-110 is the foul band, 111 and beyond is a strike - regardless of
+   how far down the list is actually ranked. */
+const SCORE_TO = 100, FOUL_TO = 110;
 const REC_KEY = 'offtheboard:records';
 let RECORDS = [];
 
@@ -269,18 +273,19 @@ function buildPool(){
   let prev = null, start = 0;
   scored.forEach((r, i) => { if (r[ci] !== prev){ start = i + 1; prev = r[ci]; } ranks.push(start); });
 
-  const depth = Math.min(cat.depth, scored.length);
-  const board = scored.slice(0, depth).map((r, i) =>
-    ({name: r[0], val: r[ci], rank: ranks[i], zone: 'board', drafted: false, by: null,
-      who: whoOf.get(r) || null}));
-  const foul = scored.slice(depth, depth + 10).map((r, i) =>
-    ({name: r[0], val: r[ci], rank: ranks[depth + i], zone: 'foul', used: false,
-      who: whoOf.get(r) || null}));
-
-  // everyone else, purely so a strike can still be told what he did
-  const off = [];
-  for (let i = depth + 10; i < scored.length; i++)
-    off.push({name: scored[i][0], val: scored[i][ci], rank: ranks[i], zone: 'off'});
+  /* The zones are cut by rank, not by how deep the list happens to run.
+     Rank 1-100 scores, 101-110 is the foul band, 111 and beyond is a strike.
+     Rank rather than position matters because ties share a rank: sixty men tied
+     at 50 all score 50 rather than the hundredth of them landing in the fouls.
+     `cat.depth` still describes how far the list is ranked, which is what lets
+     a strike report "he was 153rd" instead of just "no". */
+  const board = [], foul = [], off = [];
+  scored.forEach((r, i) => {
+    const base = {name: r[0], val: r[ci], rank: ranks[i], who: whoOf.get(r) || null};
+    if (base.rank <= SCORE_TO) board.push({...base, zone: 'board', drafted: false, by: null});
+    else if (base.rank <= FOUL_TO) foul.push({...base, zone: 'foul', used: false});
+    else off.push({...base, zone: 'off'});
+  });
   for (const r of side.rows)
     if (!(r[ci] > 0)) off.push({name: r[0], val: r[ci], rank: null, zone: 'off'});
 
@@ -291,8 +296,9 @@ function buildPool(){
     (byName.get(n) || byName.set(n, []).get(n)).push(e);
     (byLast.get(l) || byLast.set(l, []).get(l)).push(e);
   }
-  return {board, foul, byName, byLast, depth, abbr: cat.abbr, label: cat.label,
-          total: scored.length};
+  return {board, foul, byName, byLast, abbr: cat.abbr, label: cat.label,
+          depth: SCORE_TO, foulTo: FOUL_TO, listDepth: cat.depth,
+          open: board.length, total: scored.length};
 }
 
 /* Board first, then the foul band, then everyone else. Ambiguity only
@@ -369,7 +375,8 @@ function startGame(){
   show('game');
   $('g-era').textContent = S.data.label + (S.post ? ' \u00b7 Postseason' : '');
   $('g-cat').textContent = pool.label;
-  setPlate('On the clock', '\u2014', `Top ${pool.depth} \u00b7 name a player`, '');
+  setPlate('On the clock', '\u2014',
+    `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name a player`, '');
   clearMsg(); renderGame(); focusGuess();
 }
 
@@ -479,8 +486,9 @@ function foul(f){
   clearMsg();
   setPlate('Foul ball', 'FOUL',
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
-  setMsg(free ? `The list stops at ${S.G.pool.depth} \u2014 two strikes, so the foul is free. Turn passes.`
-              : `The list stops at ${S.G.pool.depth}. Strike ${p.strikes}. Turn passes.`, 'warn');
+  setMsg(free ? `Past the top ${SCORE_TO}, but at two strikes the foul is free. Turn passes.`
+              : `Past the top ${SCORE_TO} \u2014 ${SCORE_TO + 1} to ${FOUL_TO} is a foul. Strike ${p.strikes}. Turn passes.`,
+         'warn');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 420);
 }
@@ -490,7 +498,8 @@ function strike(raw, e){
   const p = S.G.players[seat()];
   p.strikes++;
   let sub;
-  if (e && e.rank)      sub = `${e.name} \u2014 ${fmtVal(e.val)} ${S.G.abbr}, ${ord(e.rank)}`;
+  if (e && e.rank)      sub = `${e.name} \u2014 ${fmtVal(e.val)} ${S.G.abbr}, ${ord(e.rank)}`
+                              + (e.rank > FOUL_TO ? ` \u00b7 only the top ${SCORE_TO} score` : '');
   else if (e)           sub = `${e.name} \u2014 no ${S.G.abbr} in this era`;
   else                  sub = `${(raw || '').trim().slice(0, 28) || '\u2014'} didn't play in this era`;
   if (p.strikes >= 3){
@@ -620,7 +629,8 @@ function renderCats(){
   const c = cats[S.catId];
   $('start').disabled = !c;
   $('start-note').textContent = c
-    ? `Top ${c.depth} in ${c.label.toLowerCase()}, ${S.data.label}${S.post ? ' postseason' : ''}.`
+    ? `Top ${SCORE_TO} in ${c.label.toLowerCase()}, ${S.data.label}${S.post ? ' postseason' : ''}`
+      + ` \u2014 ranked ${c.depth} deep, so a miss still tells you where he stood.`
     : 'Pick a category.';
 }
 
@@ -700,8 +710,10 @@ function renderRecords(){
 }
 
 /* --------------------------------------------------------------- profile */
-const DEPTH_BUCKETS = [[1,25,'1\u201325'], [26,50,'26\u201350'], [51,100,'51\u2013100'],
-                       [101,200,'101\u2013200'], [201,350,'201\u2013350'], [351,1e9,'351+']];
+/* Rescaled when scoring was cut to the top 100. The last bucket only holds
+   picks from games played before that, which are still in people's records. */
+const DEPTH_BUCKETS = [[1,10,'1\u201310'], [11,25,'11\u201325'], [26,50,'26\u201350'],
+                       [51,75,'51\u201375'], [76,100,'76\u2013100'], [101,1e9,'101+']];
 
 function profileFor(name){
   const key = name.trim().toLowerCase();

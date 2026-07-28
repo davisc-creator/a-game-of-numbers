@@ -95,19 +95,30 @@ function loadApp(){
 }
 
 /* ------------------------------------------------------------- fixture era */
+/* names have to be alphabetic — norm() strips digits, so "Filler 994" and
+   "Filler 993" would collapse to the same name and share a lookup bucket */
+const AZ = 'abcdefghijklmnopqrstuvwxyz';
+const alpha = n => AZ[Math.floor(n / 26) % 26].toUpperCase() + AZ[n % 26];
+const fill = (n, from) => Array.from({length: n}, (_, i) => [`Filler ${alpha(from - i)}`, from - i, 0]);
+
 const FIX = () => ({
   id: 'test', label: 'Test Era', y0: 2000, y1: 2001, post: false,
   sides: {
+    /* 130 deep, so the 1-100 / 101-110 / 111+ boundaries are all exercised.
+       The named men sit at fixed ranks; fillers occupy everything between. */
     bat: {
       cols: ['H', 'HR'],
       rows: [
-        ['Babe Ruth',    60, 5],
-        ['Lou Gehrig',   60, 4],   // ties Ruth on H
-        ['Hank Aaron',   44, 3],
-        ['Willie Mays',  40, 2],
-        ['Barry Bonds',  30, 1],
-        ['Bobby Bonds',  20, 0],   // shared last name, zero HR
-        ['Jose Ramirez', 10, 0],   // ASCII spelling, zero HR
+        ['Babe Ruth',   1000, 5],   // rank 1
+        ['Lou Gehrig',  1000, 4],   // rank 1, ties Ruth on H
+        ['Hank Aaron',   998, 3],   // rank 3
+        ['Willie Mays',  997, 2],   // rank 4
+        ['Barry Bonds',  996, 1],   // rank 5
+        ['Bobby Bonds',  995, 0],   // rank 6, shared last name, zero HR
+        ...fill(94, 994),           // ranks 7-100
+        ['Jose Ramirez', 900, 0],   // rank 101, first of the foul band
+        ...fill(9, 899),            // ranks 102-110, rest of the foul band
+        ...fill(20, 890),           // ranks 111-130, strike territory
       ],
     },
     pit: {cols: ['ERAm'], rows: [['Pedro Martinez', 80], ['Greg Maddux', 90], ['Roger Clemens', 100]]},
@@ -132,7 +143,7 @@ const FIX = () => ({
   },
   cats: {
     bat_h:   {side: 'bat', col: 'H',    label: 'Hits',      abbr: 'H',    depth: 3, dir: 'desc'},
-    bat_h6:  {side: 'bat', col: 'H',    label: 'Hits Deep', abbr: 'H',    depth: 6, dir: 'desc'},
+    bat_h6:  {side: 'bat', col: 'H',    label: 'Hits Deep', abbr: 'H',    depth: 130, dir: 'desc'},
     bat_hr:  {side: 'bat', col: 'HR',   label: 'Home Runs', abbr: 'HR',   depth: 3, dir: 'desc'},
     pit_em:  {side: 'pit', col: 'ERAm', label: 'ERA-',      abbr: 'ERA-', depth: 2, dir: 'asc'},
     dup_h:   {side: 'dup', col: 'H',    label: 'Dup Hits',  abbr: 'H',    depth: 7, dir: 'desc'},
@@ -181,11 +192,17 @@ eq(app.esc('<b>&"x"</b>'), '&lt;b&gt;&amp;&quot;x&quot;&lt;/b&gt;', 'esc escapes
 group('buildPool');
 {
   const P = poolFor(app, 'bat_h');
-  eq(P.board.map(e => e.rank), [1, 1, 3], 'ties share a rank, next rank skips');
-  eq(P.board.map(e => e.name), ['Babe Ruth', 'Lou Gehrig', 'Hank Aaron'], 'board is the top `depth`');
-  eq(P.depth, 3, 'depth honoured');
-  eq(P.total, 7, 'total counts everyone with a value');
-  eq(P.foul.map(e => e.rank), [4, 5, 6, 7], 'foul band is the next ten (or what is left)');
+  eq(P.board.map(e => e.rank).slice(0, 3), [1, 1, 3], 'ties share a rank, next rank skips');
+  eq(P.board.map(e => e.name).slice(0, 3), ['Babe Ruth', 'Lou Gehrig', 'Hank Aaron'], 'board leads with the best');
+  eq(P.depth, 100, 'only the top 100 score');
+  eq(P.foulTo, 110, 'and 101-110 is the foul band');
+  eq(P.board.length, 100, 'the board holds exactly those 100');
+  eq(P.board[P.board.length - 1].rank, 100, 'ending at rank 100');
+  eq(P.foul.length, 10, 'ten in the foul band');
+  eq(P.foul.map(e => e.rank), [101, 102, 103, 104, 105, 106, 107, 108, 109, 110], 'ranks 101 to 110');
+  eq(P.total, 130, 'total counts everyone with a value');
+  ok(P.board.every(e => e.rank <= 100), 'nothing past 100 can score');
+  ok(P.foul.every(e => e.rank > 100 && e.rank <= 110), 'nothing inside 100 is a foul');
   ok(P.board.every(e => !e.drafted), 'board starts undrafted');
   ok(P.foul.every(e => !e.used), 'foul band starts unused');
 }
@@ -197,15 +214,23 @@ group('buildPool');
 }
 {
   const P = poolFor(app, 'pit_em');
-  eq(P.board.map(e => e.name), ['Pedro Martinez', 'Greg Maddux'], 'asc category sorts low-first');
-  eq(P.board.map(e => e.rank), [1, 2], 'asc ranks ascend');
+  eq(P.board.map(e => e.name), ['Pedro Martinez', 'Greg Maddux', 'Roger Clemens'], 'asc category sorts low-first');
+  eq(P.board.map(e => e.rank), [1, 2, 3], 'asc ranks ascend');
+  eq(P.foul.length, 0, 'a short list has no foul band at all');
 }
 {
-  const shallow = poolFor(app, 'bat_h');
-  ok(shallow.board.length <= shallow.depth, 'board never exceeds depth');
-  const P = poolFor(app, 'bat_h6');
-  eq(P.board.length, 6, 'deeper cut takes more of the list');
-  eq(P.foul.length, 1, 'foul band is only what remains past the cut');
+  /* the whole point of the change: how deep the list is ranked must not move
+     the scoring cut. `bat_h6` ranks 130 deep, `bat_h` claims 3. Same board. */
+  const shallow = poolFor(app, 'bat_h'), deep = poolFor(app, 'bat_h6');
+  eq(shallow.board.length, deep.board.length, 'list depth does not change the cut');
+  eq(shallow.foul.map(e => e.rank), deep.foul.map(e => e.rank), 'nor the foul band');
+  eq(deep.listDepth, 130, 'the list depth is still carried, for reporting a miss');
+
+  /* rank 111 and beyond is off the board even though it is in the data */
+  const past = deep.byName.get(('Filler ' + alpha(880)).toLowerCase());
+  ok(past && past[0].zone === 'off', 'rank 111+ sits off the board');
+  eq(past && past[0].rank, 121, 'but keeps its real rank so a strike can report it');
+  eq(past && past[0].val, 880, 'and its real value');
 }
 
 group('resolve');
@@ -319,28 +344,28 @@ group('the cut is always on screen');
   /* a pick worth 153 is only legitimate if the list runs at least 153 deep,
      and the player has to be able to see that while playing */
   const G = gameOn(app, 'bat_h6', ['A', 'B']);
-  eq(app.__els.get('g-depth').textContent, String(G.pool.depth),
-     'the depth is rendered in the header, not just on the opening plate');
+  eq(app.__els.get('g-depth').textContent, '100',
+     'the cut is rendered in the header, not just on the opening plate');
   app.score(G.pool.board.find(e => e.rank === 3)); app.__drain();
   const sub = app.__els.get('plate-sub').innerHTML || app.__els.get('plate-sub').textContent;
-  ok(/3rd of 6/.test(sub), 'a scored pick says where it landed in the list', sub);
-  eq(app.__els.get('g-depth').textContent, '6', 'and the header still shows the cut after a pick');
+  ok(/3rd of 100/.test(sub), 'a scored pick says where it landed', sub);
+  eq(app.__els.get('g-depth').textContent, '100', 'and the header still shows it after a pick');
 }
 {
-  const G = gameOn(app, 'bat_h', ['A', 'B']);      // depth 3, foul band beyond
+  const G = gameOn(app, 'bat_h', ['A', 'B']);
   const p = G.players[0];
   p.strikes = 2;
   app.foul(G.pool.foul[0]); app.__drain();
   const msg = app.__els.get('msg-slot').innerHTML;
-  ok(/stops at 3/.test(msg), 'a foul names the cut it fell past', msg);
+  ok(/Past the top 100/.test(msg), 'a foul says what it fell past', msg);
   eq(p.strikes, 2, 'and is still free at two strikes');
 }
 {
   /* the invariant behind all of it, on the fixture boards */
   for (const cat of ['bat_h', 'bat_h6', 'bat_hr', 'dup_h']){
     const P = poolFor(app, cat);
-    ok(P.board.every(e => e.rank <= P.depth), `${cat}: no board rank past the cut`);
-    ok(P.foul.every(e => e.rank > P.depth), `${cat}: no foul rank inside the cut`);
+    ok(P.board.every(e => e.rank <= 100), `${cat}: nothing past 100 scores`);
+    ok(P.foul.every(e => e.rank > 100 && e.rank <= 110), `${cat}: the foul band is 101-110`);
   }
 }
 
@@ -389,7 +414,7 @@ group('records and profile');
 
 group('full game to completion');
 {
-  const G = gameOn(app, 'bat_h', ['A', 'B']);   // 3-deep board
+  const G = gameOn(app, 'blind_h', ['A', 'B']);   // a three-man board, so it empties
   app.S.G.maxRounds = 12;
   let guard = 0;
   while (!G.saved && guard++ < 50){
@@ -494,8 +519,8 @@ group('buildPool over every shipped category');
       catch (e){ bad.push(`${f} ${id} threw ${e.message}`); continue; }
       built++;
       if (!P.board.length) bad.push(`${f} ${id} empty board`);
-      if (P.board.length > P.depth) bad.push(`${f} ${id} board deeper than depth`);
-      if (P.foul.length > 10) bad.push(`${f} ${id} foul band over ten`);
+      if (P.board.some(e => e.rank > 100)) bad.push(`${f} ${id} a board player ranked past 100`);
+      if (P.foul.some(e => e.rank <= 100 || e.rank > 110)) bad.push(`${f} ${id} foul band outside 101-110`);
       const asc = d.cats[id].dir === 'asc';
       for (let i = 1; i < P.board.length; i++){
         if (P.board[i].rank < P.board[i - 1].rank) bad.push(`${f} ${id} ranks not monotonic`);
@@ -607,11 +632,24 @@ async function customRanges(){
   app.S.data = g; app.S.catId = 'bat_rbi';
   app.S.rangeId = '1994-2005'; app.S.post = false; app.S.seats = ['A', 'B']; app.S.rounds = 12;
   app.startGame(); app.__drain();
-  const r = app.resolve('Alex Gonzalez');
-  ok(r.k === 'choose' || r.k === 'hit', 'a contested name still resolves in a custom range');
-  if (r.k === 'choose')
-    ok(r.list.every(e => e.who && e.who[1]), 'and each option carries a career span');
-  else ok(true, 'or is awarded when unresolvable');
+  /* a 100-deep board carries far fewer namesakes than the old 500-deep one, so
+     sweep every category of the range rather than betting on one */
+  let shared = 0, bad = [], spanned = 0;
+  for (const cid of Object.keys(g.cats)){
+    app.S.catId = cid; app.startGame(); app.__drain();
+    const counts = new Map();
+    for (const e of app.S.G.pool.board) counts.set(e.name, (counts.get(e.name) || 0) + 1);
+    for (const [name, n] of counts){
+      if (n < 2) continue;
+      shared++;
+      const r = app.resolve(name);
+      if (!['choose', 'hit'].includes(r.k)) bad.push(`${cid} "${name}" -> ${r.k}`);
+      if (r.k === 'choose' && r.list.every(e => e.who && e.who[1])) spanned++;
+    }
+  }
+  ok(shared > 0, `1994-2005 carries namesakes inside the top 100 (${shared} across its categories)`);
+  eq(bad.slice(0, 3), [], 'and every one of them is draftable');
+  ok(spanned > 0 || shared === 0, 'chooser options carry a career span');
 }
 
 /* -------------------------------------------------------------------- done */

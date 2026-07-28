@@ -5,7 +5,7 @@ the browser — no server, no accounts, no build step.
 
 | Game | What it is |
 | --- | --- |
-| **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players, score their rank. Deep cuts pay more than obvious ones. |
+| **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players. The top 100 score their rank, 101–110 is a foul, 111 and beyond is a strike. Deep cuts pay more than obvious ones. |
 | **162-0** | Spin a club and a ten-year window, take one of their players, repeat until you have a 21-man roster. Then it plays a season. |
 
 Switch between them from the **Games** menu, top right.
@@ -61,8 +61,10 @@ Notes on the numbers:
 
 - **Ties share a rank.** Two players with identical totals are worth the same,
   rather than one arbitrarily outranking the other.
-- **Depth adapts.** Lists run 500 deep where that is meaningful and stop early
-  where it is not — 1920 only had 116 players who hit a home run all year.
+- **Depth adapts.** Lists are *ranked* 500 deep where that is meaningful and
+  stop early where it is not — 1920 only had 116 players who hit a home run all
+  year. That depth is not the scoring cut: only the top 100 ever score. It
+  exists so a strike can still tell you the man you named ranked 153rd.
 - **Four categories are era-gated** because the data is not there before a
   certain point: GIDP from 1940, Caught Stealing from 1951, Intentional Walks
   from 1955. All-Star selections start in 1933, Cy Youngs 1956, Gold Gloves
