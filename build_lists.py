@@ -85,8 +85,21 @@ def load():
         df['yearID'] = df.yearID.astype(int)
     allstar['yearID'] = allstar.yearID.astype(int)
     awards['yearID']  = awards.yearID.astype(int)
+    # Stable integer id per player, so the client can aggregate any span of
+    # seasons without joining on name - which would re-merge the namesakes.
+    # Award tables too: a handful of Negro League All-Stars have a selection
+    # but no batting or pitching line, and dropping them would shorten the
+    # awards board the client builds for a custom range.
+    seen = set()
+    for df in (bat, pit, allstar, awards):
+        d = df[(df.yearID >= FIRST_YEAR) & (df.yearID <= LAST_YEAR)]
+        seen.update(d.playerID.unique())
+    order = sorted(seen)
+    idx_of = {p: i for i, p in enumerate(order)}
+
     return dict(bat=bat, pit=pit, bpost=bpost, ppost=ppost, allstar=allstar,
                 awards=awards, name_of=name_of, span_of=span_of,
+                idx_of=idx_of, idx_order=order,
                 gpy=tms.groupby('yearID').G.median())
 
 
@@ -134,7 +147,7 @@ def num(v):
     return int(v) if v == int(v) else round(v, 2)
 
 
-def make_side(agg, cat_defs, name_of, y0, extra_cols=(), ident=None):
+def make_side(agg, cat_defs, name_of, y0, extra_cols=(), ident=None, idx_of=None):
     cols, cats = [], {}
     for cid, col, label, abbr, since in cat_defs:
         if y0 < since or col not in agg.columns:
@@ -179,6 +192,8 @@ def make_side(agg, cat_defs, name_of, y0, extra_cols=(), ident=None):
     side = {'cols': cols, 'rows': rows}
     if who:
         side['who'] = who
+    if idx_of is not None:
+        side['ids'] = [idx_of.get(p, -1) for p in pids]
     return side, cats
 
 
@@ -199,7 +214,7 @@ def build(D, y0, y1, post=False):
         agg['TB']  = agg.H + agg.X2B + 2 * agg.X3B + 3 * agg.HR
         agg['XBH'] = agg.X2B + agg.X3B + agg.HR
         agg['B1']  = agg.H - agg.X2B - agg.X3B - agg.HR
-        side, c = make_side(agg, BAT, D['name_of'], y0, ident=ident)
+        side, c = make_side(agg, BAT, D['name_of'], y0, ident=ident, idx_of=D['idx_of'])
         if side:
             sides['bat'] = side
             cats.update({k: dict(v, side='bat') for k, v in c.items()})
@@ -220,7 +235,8 @@ def build(D, y0, y1, post=False):
                 agg.loc[agg.IP < min_ip, 'ERAm'] = 0
                 agg['ERAm'] = agg.ERAm.fillna(0)
                 defs = defs + [('pit_era', 'ERAm', f'ERA- (min {min_ip:g} IP)', 'ERA-', 1920)]
-        side, c = make_side(agg, defs, D['name_of'], y0, extra_cols=('IP',), ident=ident)
+        side, c = make_side(agg, defs, D['name_of'], y0, extra_cols=('IP', 'ER', 'IPouts'),
+                            ident=ident, idx_of=D['idx_of'])
         if side:
             sides['pit'] = side
             cats.update({k: dict(v, side='pit') for k, v in c.items()})
@@ -236,7 +252,7 @@ def build(D, y0, y1, post=False):
                                how='outer')
         if len(tally):
             tally = tally.fillna(0).reset_index()
-            side, c = make_side(tally, AWD, D['name_of'], y0, ident=ident)
+            side, c = make_side(tally, AWD, D['name_of'], y0, ident=ident, idx_of=D['idx_of'])
             if side:
                 sides['awd'] = side
                 cats.update({k: dict(v, side='awd') for k, v in c.items()})
@@ -244,9 +260,61 @@ def build(D, y0, y1, post=False):
     return sides, cats
 
 
+def write_globals(D):
+    """Everything the client needs to aggregate an arbitrary span of seasons
+    itself. Precomputing every range is not an option - 1920-2025 alone has
+    5,671 of them."""
+    # The category tables themselves, so the client aggregator does not carry a
+    # second hand-maintained copy of them that can drift from this one.
+    with open(os.path.join(OUT_DIR, 'cats.json'), 'w', encoding='utf-8') as f:
+        json.dump({'bat': BAT, 'pit': PIT, 'awd': AWD,
+                   'era_rate': ERA_QUAL_RATE, 'award_min_seasons': AWARD_MIN_SEASONS,
+                   'max_depth': MAX_DEPTH, 'max_tie_tail': MAX_TIE_TAIL,
+                   'first': FIRST_YEAR, 'last': LAST_YEAR},
+                  f, separators=(',', ':'))
+
+    order = D['idx_order']
+    with open(os.path.join(OUT_DIR, 'players.json'), 'w', encoding='utf-8') as f:
+        json.dump({'n': [D['name_of'].get(p, p) for p in order],
+                   's': [D['span_of'].get(p, '') for p in order]},
+                  f, ensure_ascii=False, separators=(',', ':'))
+
+    # Median team games per season, for the ERA- innings qualifier.
+    gpy = D['gpy']
+    with open(os.path.join(OUT_DIR, 'league.json'), 'w', encoding='utf-8') as f:
+        json.dump({'g': {str(int(y)): float(v) for y, v in gpy.items()
+                         if FIRST_YEAR <= y <= LAST_YEAR}},
+                  f, separators=(',', ':'))
+
+    # Award tallies per player-season, so ranges of ten seasons or more can
+    # build the awards board without a precomputed file.
+    idx = D['idx_of']
+    rows = {}
+    a = D['allstar']
+    a = a[(a.yearID >= FIRST_YEAR) & (a.yearID <= LAST_YEAR)]
+    a = a.drop_duplicates(['playerID', 'yearID'])
+    for pid, yr in zip(a.playerID, a.yearID):
+        if pid in idx:
+            rows.setdefault((idx[pid], int(yr)), [0, 0, 0, 0, 0])[0] += 1
+    aw = D['awards']
+    aw = aw[(aw.yearID >= FIRST_YEAR) & (aw.yearID <= LAST_YEAR)]
+    for slot, (key, label) in enumerate(AWARD_SRC.items(), start=1):
+        sub = aw[aw.awardID == label]
+        for pid, yr in zip(sub.playerID, sub.yearID):
+            if pid in idx:
+                rows.setdefault((idx[pid], int(yr)), [0, 0, 0, 0, 0])[slot] += 1
+    flat = [[p, y] + v for (p, y), v in sorted(rows.items())]
+    with open(os.path.join(OUT_DIR, 'awards.json'), 'w', encoding='utf-8') as f:
+        json.dump({'cols': ['AS'] + list(AWARD_SRC), 'rows': flat},
+                  f, separators=(',', ':'))
+    return len(order), len(flat)
+
+
 def main():
     D = load()
     os.makedirs(OUT_DIR, exist_ok=True)
+    n_players, n_awards = write_globals(D)
+    print(f"players.json {n_players}  awards.json {n_awards} player-seasons\n")
     ranges = [(y, y, str(y), str(y), 'season') for y in range(FIRST_YEAR, LAST_YEAR + 1)]
     for d in range(1920, LAST_YEAR + 1, 10):
         a, b = max(d, FIRST_YEAR), min(d + 9, LAST_YEAR)

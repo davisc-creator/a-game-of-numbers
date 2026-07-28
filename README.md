@@ -37,8 +37,15 @@ other — merging is by game timestamp, so importing twice is harmless.
 
 ## The data
 
-`data/` holds 124 ranges: every season 1920–2025, every decade, and seven spans,
-each with a regular-season and a postseason file. Up to 36 categories per range.
+`data/` holds 124 ready-made ranges: every season 1920–2025, every decade, and
+seven spans, each with a regular-season and a postseason file. Up to 36
+categories per range.
+
+Any other span — 1963–1977, say — is built in the browser from the season
+files, because 1920–2025 contains 5,671 possible ranges and precomputing them
+is not sensible. The aggregation mirrors `build_lists.py` exactly; the test
+suite rebuilds every shipped decade and span through it and compares them cell
+for cell.
 
 Built from the Lahman database with `build_lists.py`:
 

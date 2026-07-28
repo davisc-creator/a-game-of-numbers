@@ -11,6 +11,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
+const RANGE_FILE = /^\d{4}(-\d{4})?(-post)?\.json$/;
 
 /* ------------------------------------------------------------ tiny harness */
 let pass = 0, fail = 0, section = '';
@@ -66,7 +67,13 @@ function loadApp(){
        tests drain it deliberately instead of racing it */
     setTimeout: fn => { timers.push(fn); return timers.length; },
     clearTimeout(){},
-    fetch: () => Promise.reject(new Error('no network in tests')),
+    /* serves data/ off disk so the custom-range aggregator can be exercised
+       exactly as the browser runs it */
+    fetch: url => {
+      const p = path.join(ROOT, String(url));
+      if (!fs.existsSync(p)) return Promise.resolve({ok: false, json: () => Promise.reject(new Error('404'))});
+      return Promise.resolve({ok: true, json: () => Promise.resolve(JSON.parse(fs.readFileSync(p, 'utf8')))});
+    },
     URL: {createObjectURL: () => 'blob:', revokeObjectURL(){}},
     Blob: function(){},
     JSON, Math, Date, Map, Set, Array, Object, Number, String, Promise, Error,
@@ -77,7 +84,7 @@ function loadApp(){
   const epilogue = `
 ;({norm, lastOf, firstOf, lev, ord, fmtVal, esc, buildPool, resolve, order, seat,
    alive, openLeft, startGame, submitGuess, score, foul, strike, finish, advance,
-   careerStats, profileFor, DEPTH_BUCKETS, S,
+   careerStats, profileFor, DEPTH_BUCKETS, S, buildCustom, rnd, depthOf, CX,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -377,7 +384,11 @@ group('shipped data');
   ok(Array.isArray(manifest.ranges), 'manifest has a ranges array');
   eq(manifest.ranges.length, 124, 'manifest lists 124 ranges');
 
-  const files = fs.readdirSync(DATA).filter(f => f.endsWith('.json') && f !== 'manifest.json');
+  /* the shared tables the custom-range aggregator reads are not ranges */
+  const GLOBAL = new Set(['manifest.json', 'cats.json', 'players.json',
+                          'league.json', 'awards.json']);
+  GLOBAL.forEach(g => ok(fs.existsSync(path.join(DATA, g)), `${g} is shipped`));
+  const files = fs.readdirSync(DATA).filter(f => f.endsWith('.json') && !GLOBAL.has(f));
 
   /* 1994 has no postseason file because the strike cancelled it. The manifest
      omits its `post` entry and renderRanges filters on that, so the era never
@@ -440,7 +451,7 @@ group('shipped data');
 
 group('buildPool over every shipped category');
 {
-  const files = fs.readdirSync(DATA).filter(f => f.endsWith('.json') && f !== 'manifest.json');
+  const files = fs.readdirSync(DATA).filter(f => RANGE_FILE.test(f));
   const bad = [];
   let built = 0, sharedBoards = 0, sharedSlots = 0, chooseable = 0, awarded = 0;
   for (const f of files){
@@ -497,11 +508,91 @@ group('buildPool over every shipped category');
   eq(bad.slice(0, 5), [], 'every shipped category builds a sane, fully draftable board');
 }
 
-/* -------------------------------------------------------------------- done */
-console.log(`\n${'─'.repeat(52)}`);
-console.log(fail === 0 ? `ALL PASS  — ${pass} assertions` : `${pass} passed, ${fail} FAILED`);
-if (fail){
-  console.log('');
-  failures.forEach(f => console.log(`  ✗ ${f}`));
+/* ===================================================== custom year ranges */
+/* The shipped decades and spans are ground truth: rebuilding each one through
+   the client aggregator must reproduce it cell for cell. If these pass, an
+   arbitrary range like 1963-1977 is built by exactly the same arithmetic. */
+async function customRanges(){
+  group('custom ranges vs the shipped ones');
+  const manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));
+  const multi = manifest.ranges.filter(r => r.y1 > r.y0);
+  const seasons = manifest.ranges.filter(r => r.y1 === r.y0);
+
+  const strip = d => {
+    const c = JSON.parse(JSON.stringify(d));
+    for (const s of Object.values(c.sides)) delete s.who;   // team is per-range; see below
+    return c;
+  };
+
+  let checked = 0;
+  const mismatch = [];
+  for (const r of multi.concat(seasons.slice(0, 6))){
+    const built = await app.buildCustom(r.y0, r.y1, false);
+    const want = JSON.parse(fs.readFileSync(path.join(DATA, `${r.id}.json`), 'utf8'));
+    checked++;
+    if (!built){ mismatch.push(`${r.id}: nothing built`); continue; }
+    const a = strip(built), b = strip(want);
+    if (JSON.stringify(a.cats) !== JSON.stringify(b.cats)) mismatch.push(`${r.id}: cats`);
+    for (const k of Object.keys(b.sides)){
+      if (!a.sides[k]){ mismatch.push(`${r.id}: missing side ${k}`); continue; }
+      for (const field of ['cols', 'rows', 'ids'])
+        if (JSON.stringify(a.sides[k][field]) !== JSON.stringify(b.sides[k][field]))
+          mismatch.push(`${r.id}.${k}.${field}`);
+    }
+    if (Object.keys(a.sides).length !== Object.keys(b.sides).length)
+      mismatch.push(`${r.id}: side count`);
+  }
+  console.log(`   (${checked} shipped ranges rebuilt from season files)`);
+  eq(mismatch.slice(0, 6), [], 'every shipped multi-year range rebuilds cell for cell');
+
+  const dec = await app.buildCustom(1970, 1979, false);
+  const shipped = JSON.parse(fs.readFileSync(path.join(DATA, '1970-1979.json'), 'utf8'));
+  eq(dec.cats.bat_h.depth, shipped.cats.bat_h.depth, 'depth is recomputed, not guessed');
+  eq(dec.sides.pit.cols.includes('ERAm'), true, 'ERA- is rebuilt for the range');
+  eq(dec.cats.pit_era.label, shipped.cats.pit_era.label, 'and carries the same innings qualifier');
+  ok(!!dec.sides.awd, 'a ten-season range gets the awards board');
+
+  const short = await app.buildCustom(1963, 1971, false);
+  ok(!short.sides.awd, 'a nine-season range does not');
+
+  /* the point of the whole exercise: a range nobody precomputed */
+  const odd = await app.buildCustom(1963, 1977, false);
+  ok(!!odd, '1963-1977 builds');
+  eq(odd.label, '1963–1977', 'and labels itself');
+  ok(Object.keys(odd.cats).length > 20, 'with a full slate of categories');
+  app.S.data = odd; app.S.catId = 'bat_h';
+  const P = app.buildPool();
+  eq(P.board[0].rank, 1, 'its board starts at rank 1');
+  ok(P.board.length === P.depth, 'and is cut to its own depth');
+  ok(P.board[0].val >= P.board[P.board.length - 1].val, 'sorted');
+
+  /* era gates still apply from the range start, not the season files */
+  const early = await app.buildCustom(1930, 1945, false);
+  ok(!early.cats.bat_gidp, 'GIDP stays gated for a range starting before 1940');
+  const late = await app.buildCustom(1955, 1970, false);
+  ok(!!late.cats.bat_ibb, 'and appears for one starting after 1955');
+
+  /* namesakes remain separable in a custom range */
+  const g = await app.buildCustom(1994, 2005, false);
+  app.S.data = g; app.S.catId = 'bat_rbi';
+  app.S.rangeId = '1994-2005'; app.S.post = false; app.S.seats = ['A', 'B']; app.S.rounds = 12;
+  app.startGame(); app.__drain();
+  const r = app.resolve('Alex Gonzalez');
+  ok(r.k === 'choose' || r.k === 'hit', 'a contested name still resolves in a custom range');
+  if (r.k === 'choose')
+    ok(r.list.every(e => e.who && e.who[1]), 'and each option carries a career span');
+  else ok(true, 'or is awarded when unresolvable');
 }
-process.exit(fail === 0 ? 0 : 1);
+
+/* -------------------------------------------------------------------- done */
+function done(){
+  console.log(`\n${'─'.repeat(52)}`);
+  console.log(fail === 0 ? `ALL PASS  — ${pass} assertions` : `${pass} passed, ${fail} FAILED`);
+  if (fail){
+    console.log('');
+    failures.forEach(f => console.log(`  ✗ ${f}`));
+  }
+  process.exit(fail === 0 ? 0 : 1);
+}
+
+customRanges().then(done, e => { console.error(e); process.exit(1); });

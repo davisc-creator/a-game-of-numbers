@@ -67,6 +67,10 @@ tests/run.js          node test suite, no dependencies, not shipped to the page
 data/manifest.json    index of all ranges
 data/<range>.json     e.g. 2024.json, 1970-1979.json, 2000-2025.json
 data/<range>-post.json  postseason equivalents
+data/cats.json        the category tables, shared with the client aggregator
+data/players.json     name and career span per player id
+data/league.json      median team games per season, for the ERA- qualifier
+data/awards.json      award tallies per player-season
 ```
 
 Screens are `<section id="screen-*">` toggled by `show(name)` in app.js. There
@@ -97,6 +101,11 @@ turn a column into a leaderboard.
 `rows[i][0]` is the player name; the rest align with `cols`. `buildPool()` in
 app.js sorts a column, assigns competition ranks, cuts at `depth`, takes the
 next ten as the foul band, and indexes everyone else for lookup.
+
+Every side also carries `ids`: the player id for each row, drawn from
+`players.json`. It exists so a custom range can add a player's seasons together
+without joining on name — which would re-merge the namesakes. Pitching sides
+additionally carry `ER` and `IPouts`, which ERA− has to be rebuilt from.
 
 A side may also carry `who`: `{"<row index>": ["<team>", "<career span>"]}`,
 present only for names the file holds more than once. It exists so the client
@@ -161,6 +170,36 @@ Jr./Sr., resolves bare last names when only one board player matches, handles
 Regenerating data needs `pip install pandas pyreadr` and the Lahman tarball
 from `codeload.github.com/cdalzell/Lahman/tar.gz/refs/heads/master`, extracted
 so the `.RData` files sit in `lah/data/`.
+
+---
+
+## Custom year ranges
+
+The **Custom** tab takes any span from 1920 to 2025 and aggregates it in the
+browser out of the season files. Precomputing them was never an option: 1920 to
+2025 contains 5,671 distinct ranges.
+
+`buildCustom()` in app.js is a deliberate reimplementation of `build()` in
+`build_lists.py` — the same era gates, the same all-zero row drop, the same
+derived columns, the same ERA− against the range's own league context, the same
+`depth_of` with its tie tail, the same ten-season floor on awards.
+
+**These two must not drift.** The suite rebuilds all 18 shipped decades and
+spans plus a sample of seasons through the client path and compares them cell
+for cell against the shipped files. Change the arithmetic on either side and
+that test fails, which is the point. Two things make it work and are easy to
+break by accident:
+
+- **Row order.** pandas `groupby` sorts by `playerID`; ids are assigned in the
+  same sorted order, so sorting rows by id reproduces it. Assign ids any other
+  way and every row order diverges.
+- **Rounding.** Python and numpy round half to *even*; JS rounds half *up*.
+  `rnd()` implements the former. Use `Math.round` here and ranges disagree in
+  the last digit.
+
+One deliberate difference: a custom range has no per-range team, so its
+namesake chooser shows the career span alone rather than team and span. The
+test strips `who` before comparing for exactly this reason.
 
 ---
 

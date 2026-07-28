@@ -40,9 +40,21 @@
         <button class="pill" data-kind="span" aria-pressed="true">Spans</button>
         <button class="pill" data-kind="decade">Decades</button>
         <button class="pill" data-kind="season">Seasons</button>
+        <button class="pill" data-kind="custom">Custom</button>
       </div>
       <input type="text" id="range-search" placeholder="Search a year, e.g. 1975" autocomplete="off" style="margin-top:10px">
       <div class="pill-set scroller" id="range-set"></div>
+      <div id="custom-set" class="hidden">
+        <div class="years">
+          <label for="yr-from">From</label>
+          <input type="number" id="yr-from" inputmode="numeric" min="1920" max="2025" value="1963">
+          <span class="dash">to</span>
+          <label for="yr-to" class="sr-only">To</label>
+          <input type="number" id="yr-to" inputmode="numeric" min="1920" max="2025" value="1977">
+          <button class="btn small" id="yr-go">Build</button>
+        </div>
+        <p class="hint" id="yr-note">Any span from 1920 to 2025. Built in your browser from the season files.</p>
+      </div>
       <div class="toggle-row">
         <span class="tog-label">Season type</span>
         <div class="pill-set">

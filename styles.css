@@ -138,3 +138,14 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .choose{display:flex;flex-wrap:wrap;gap:8px}
 .choose .btn{text-align:left}
 .choose .mono{opacity:.8;margin-right:6px}
+
+/* custom year range */
+.years{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+.years label{margin:0;flex:0 0 auto}
+.years input[type=number]{width:96px;flex:0 0 auto;background:var(--slot);color:var(--chalk);
+  border:1px solid var(--rule);border-radius:var(--radius);padding:9px 10px;
+  font-family:'IBM Plex Mono',monospace;font-size:16px}
+.years .dash{color:var(--chalk-dim);font-size:13px;letter-spacing:.14em;text-transform:uppercase;font-weight:700}
+.years .btn{flex:0 0 auto}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
