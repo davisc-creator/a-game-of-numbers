@@ -1,0 +1,62 @@
+# Off the Board
+
+A baseball leaderboard snake draft. Pick an era and a stat, take turns naming
+players, score their rank. Deep cuts pay more than obvious ones.
+
+Runs entirely in the browser. No server, no accounts, no build step.
+
+## Play it locally
+
+The app fetches JSON, so `file://` will not work. Serve the folder:
+
+    cd off-the-board
+    python3 -m http.server 8000
+
+Then open <http://localhost:8000>.
+
+## Put it online
+
+**GitHub Pages** — push this folder to a repo, then Settings → Pages → deploy
+from `main` / root. Live in about a minute at
+`https://<you>.github.io/<repo>/`.
+
+**Netlify Drop** — drag the folder onto <https://app.netlify.com/drop>.
+
+Once it is on https, open it on your phone and use *Add to Home Screen*. The
+service worker caches the app and every era you have opened, so it keeps
+working with no signal.
+
+## Records
+
+Stored in `localStorage`, per device and per browser. To combine records from a
+phone and a laptop, use **Export records** on one and **Import records** on the
+other — merging is by game timestamp, so importing twice is harmless.
+
+## The data
+
+`data/` holds 124 ranges: every season 1920–2025, every decade, and seven spans,
+each with a regular-season and a postseason file. Up to 36 categories per range.
+
+Built from the Lahman database with `build_lists.py`:
+
+    pip install pandas pyreadr
+    curl -L -o lahman.tar.gz \
+      https://codeload.github.com/cdalzell/Lahman/tar.gz/refs/heads/master
+    mkdir -p lah && tar xzf lahman.tar.gz -C lah --strip-components=1
+    python3 build_lists.py
+
+Notes on the numbers:
+
+- **Ties share a rank.** Two players with identical totals are worth the same,
+  rather than one arbitrarily outranking the other.
+- **Depth adapts.** Lists run 500 deep where that is meaningful and stop early
+  where it is not — 1920 only had 116 players who hit a home run all year.
+- **Four categories are era-gated** because the data is not there before a
+  certain point: GIDP from 1940, Caught Stealing from 1951, Intentional Walks
+  from 1955. All-Star selections start in 1933, Cy Youngs 1956, Gold Gloves
+  1957, Silver Sluggers 1980.
+- **ERA−** is league-relative with no park adjustment, so it will not match
+  FanGraphs exactly. 100 is average and lower is better.
+- **Names are plain ASCII** — "Jose Ramirez", not "José Ramírez". Typing either
+  works; accents are stripped when matching.
+- Lahman ends at **2025**, so there is no 2026.

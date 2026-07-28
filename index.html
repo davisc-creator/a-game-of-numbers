@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1B3B2F">
+<title>Off the Board</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>Off the Board</h1>
+    <p>Leaderboard snake draft</p>
+    <nav>
+      <button id="nav-setup" aria-current="true">New game</button>
+      <button id="nav-records">Records</button>
+      <button id="nav-rules">Rules</button>
+    </nav>
+  </div>
+
+  <!-- SETUP -->
+  <section id="screen-setup">
+    <div class="card">
+      <h2>Who's drafting</h2>
+      <div id="seats"></div>
+      <button class="btn ghost small" id="add-seat">+ Add drafter</button>
+      <p class="hint">Use real names &mdash; records track people across games by name.</p>
+    </div>
+
+    <div class="card">
+      <h2>Era</h2>
+      <div class="pill-set" id="kind-set">
+        <button class="pill" data-kind="span" aria-pressed="true">Spans</button>
+        <button class="pill" data-kind="decade">Decades</button>
+        <button class="pill" data-kind="season">Seasons</button>
+      </div>
+      <input type="text" id="range-search" placeholder="Search a year, e.g. 1975" autocomplete="off" style="margin-top:10px">
+      <div class="pill-set scroller" id="range-set"></div>
+      <div class="toggle-row">
+        <span class="tog-label">Season type</span>
+        <div class="pill-set">
+          <button class="pill" id="tog-reg" aria-pressed="true">Regular</button>
+          <button class="pill" id="tog-post">Postseason</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Category</h2>
+      <div class="grp-label">Batting</div>
+      <div class="pill-set" id="cats-bat"></div>
+      <div class="grp-label">Pitching</div>
+      <div class="pill-set" id="cats-pit"></div>
+      <div class="grp-label" id="awd-label">Awards</div>
+      <div class="pill-set" id="cats-awd"></div>
+    </div>
+
+    <div class="card">
+      <h2>Length</h2>
+      <div class="pill-set" id="rounds-set">
+        <button class="pill" data-rounds="8">8 rounds</button>
+        <button class="pill" data-rounds="12" aria-pressed="true">12 rounds</button>
+        <button class="pill" data-rounds="0">Until everyone's out</button>
+      </div>
+    </div>
+
+    <button class="btn" id="start">Start draft</button>
+    <p class="hint" id="start-note">Loading&hellip;</p>
+  </section>
+
+  <!-- RULES -->
+  <section id="screen-rules" class="hidden">
+    <div class="card">
+      <h2>How it works</h2>
+      <p>Pick an era and a stat and a leaderboard gets locked in behind the scenes. Nobody sees it.</p>
+      <p>Drafters take turns naming players in snake order: 1&#8209;2&#8209;3&#8209;4, then 4&#8209;3&#8209;2&#8209;1, back and forth.</p>
+      <p><strong class="gold">Name someone on the list and you score their rank.</strong> The 137th&#8209;best player is worth 137. Deep cuts pay more than obvious ones &mdash; that's the whole game.</p>
+      <p>Once a player is named, he's off the board for everyone. Tied players share a rank and are worth the same.</p>
+      <p><strong class="gold">Foul ball.</strong> Name someone in the ten spots just past the end of the list and you've fouled it off. It costs a strike if you have fewer than two; with two strikes it's free. Either way your turn ends. Each of those ten only saves you once.</p>
+      <p>Anyone else is a strike &mdash; but you'll still be told exactly what he did and where he ranked. Three strikes and you're done drafting; everyone else keeps going.</p>
+      <p>Typos and last names are forgiven. Naming someone already taken costs nothing.</p>
+      <p>Most points when the dust settles wins.</p>
+    </div>
+  </section>
+
+  <!-- RECORDS -->
+  <section id="screen-records" class="hidden">
+    <div class="card">
+      <h2>Ball knowledge</h2>
+      <div class="pill-set" id="rec-sort" style="margin-bottom:12px">
+        <button class="pill" data-sort="ppg" aria-pressed="true">Points/game</button>
+        <button class="pill" data-sort="hit">Hit rate</button>
+        <button class="pill" data-sort="depth">Avg depth</button>
+        <button class="pill" data-sort="wins">Wins</button>
+      </div>
+      <div id="rec-list"></div>
+      <p class="hint" id="rec-empty">No games finished yet.</p>
+      <p class="hint" id="rec-key"></p>
+    </div>
+    <div class="card">
+      <h2>Past games</h2>
+      <div id="hist-list"></div>
+      <p class="hint" id="hist-empty">Nothing played yet.</p>
+    </div>
+    <div class="row">
+      <button class="btn ghost small shrink" id="rec-export">Export records</button>
+      <button class="btn ghost small shrink" id="rec-import">Import records</button>
+      <button class="btn ghost small shrink" id="rec-clear">Clear all</button>
+    </div>
+    <input type="file" id="rec-file" accept="application/json" class="hidden">
+    <p class="hint" id="rec-msg"></p>
+  </section>
+
+  <!-- GAME -->
+  <section id="screen-game" class="hidden">
+    <div class="card" style="padding:12px">
+      <div class="row" style="margin-bottom:10px">
+        <div>
+          <div class="eyebrow" style="margin:0" id="g-era">&nbsp;</div>
+          <div id="g-cat" class="big-label"></div>
+        </div>
+        <div class="shrink" style="text-align:right">
+          <div class="eyebrow" style="margin:0">Round</div>
+          <div id="g-round" class="big-label"></div>
+        </div>
+        <div class="shrink" style="text-align:right">
+          <div class="eyebrow" style="margin:0">Left</div>
+          <div id="g-left" class="big-label"></div>
+        </div>
+      </div>
+      <div class="board" id="board"></div>
+    </div>
+
+    <div class="plate" id="plate">
+      <div class="meta" id="plate-meta">On the clock</div>
+      <div class="big" id="plate-big">&mdash;</div>
+      <div class="sub" id="plate-sub">Name a player</div>
+    </div>
+
+    <div id="msg-slot"></div>
+
+    <div class="card">
+      <label for="guess">Your pick</label>
+      <div class="row">
+        <input type="text" id="guess" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Type a player name">
+        <button class="btn shrink" id="submit">Submit</button>
+      </div>
+      <div id="confirm-slot"></div>
+    </div>
+
+    <div class="card">
+      <h2>Off the board</h2>
+      <div class="log" id="log"></div>
+      <p class="hint" id="log-empty">Nothing drafted yet.</p>
+    </div>
+
+    <button class="btn ghost small" id="quit">End game</button>
+  </section>
+
+  <!-- OVER -->
+  <section id="screen-over" class="hidden">
+    <div class="card">
+      <h2 id="over-head">Final</h2>
+      <div id="results"></div>
+    </div>
+    <div class="card">
+      <h2>Best players nobody took</h2>
+      <div id="missed" class="mono"></div>
+    </div>
+    <div class="row">
+      <button class="btn shrink" id="again">New game</button>
+      <button class="btn ghost shrink" id="to-records">See records</button>
+    </div>
+  </section>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

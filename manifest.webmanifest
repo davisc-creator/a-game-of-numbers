@@ -1,0 +1,11 @@
+{
+  "name": "Off the Board",
+  "short_name": "Off the Board",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#142C24",
+  "theme_color": "#1B3B2F",
+  "icons": [
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}

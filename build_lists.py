@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""
+Off the Board - leaderboard builder v2.
+
+Writes one JSON per range holding a full player table per side (batting,
+pitching, awards). The client sorts a column to build a leaderboard, cuts
+at the stored depth, takes the next 10 as the foul band, and can still
+look up any player past that - which is what makes "you struck out, but
+here is where he actually ranked" possible.
+
+Regular season -> <range>.json
+Postseason     -> <range>-post.json
+
+Source: github.com/cdalzell/Lahman  (1871-2025)
+Needs:  pip install pandas pyreadr
+"""
+import json, os
+import pandas as pd
+
+FIRST_YEAR, LAST_YEAR = 1920, 2025
+MAX_DEPTH, MAX_TIE_TAIL, FOUL_BAND = 500, 30, 10
+ERA_QUAL_RATE = 0.6
+AWARD_MIN_SEASONS = 10          # "most MVPs in 2024" is not a leaderboard
+
+LAHMAN_DIR = os.environ.get('LAHMAN_DIR', 'lah/data')
+OUT_DIR    = os.environ.get('OUT_DIR', 'data')
+
+# id, column, label, abbr, first reliable year
+BAT = [('bat_h','H','Hits','H',1920), ('bat_r','R','Runs','R',1920),
+       ('bat_rbi','RBI','RBI','RBI',1920), ('bat_hr','HR','Home Runs','HR',1920),
+       ('bat_2b','X2B','Doubles','2B',1920), ('bat_3b','X3B','Triples','3B',1920),
+       ('bat_bb','BB','Walks','BB',1920), ('bat_so','SO','Strikeouts','SO',1920),
+       ('bat_sb','SB','Stolen Bases','SB',1920), ('bat_hbp','HBP','Hit By Pitch','HBP',1920),
+       ('bat_sh','SH','Sac Bunts','SH',1920), ('bat_g','G','Games Played','G',1920),
+       ('bat_tb','TB','Total Bases','TB',1920), ('bat_xbh','XBH','Extra-Base Hits','XBH',1920),
+       ('bat_1b','B1','Singles','1B',1920), ('bat_gidp','GIDP','GIDP','GIDP',1940),
+       ('bat_cs','CS','Caught Stealing','CS',1951), ('bat_ibb','IBB','Intentional BB','IBB',1955)]
+
+PIT = [('pit_ip','IP','Innings','IP',1920), ('pit_so','SO','Strikeouts','SO',1920),
+       ('pit_w','W','Wins','W',1920), ('pit_l','L','Losses','L',1920),
+       ('pit_sv','SV','Saves','SV',1920), ('pit_g','G','Appearances','G',1920),
+       ('pit_gs','GS','Games Started','GS',1920), ('pit_cg','CG','Complete Games','CG',1920),
+       ('pit_sho','SHO','Shutouts','SHO',1920), ('pit_hra','HR','Home Runs Given','HR',1920),
+       ('pit_bba','BB','Walks Given','BB',1920), ('pit_wp','WP','Wild Pitches','WP',1920)]
+
+# No start-year gate: an award tally only counts what happened inside the
+# range, so a 1920-2025 All-Star count is complete rather than partial.
+AWD = [('awd_as','AS','All-Star Selections','AS',0),
+       ('awd_mvp','MVP','MVP Awards','MVP',0),
+       ('awd_cy','CY','Cy Young Awards','CY',0),
+       ('awd_gg','GG','Gold Gloves','GG',0),
+       ('awd_ss','SS','Silver Sluggers','SS',0)]
+
+AWARD_SRC = {'MVP':'Most Valuable Player', 'CY':'Cy Young Award',
+             'GG':'Gold Glove', 'SS':'Silver Slugger'}
+
+BAT_NUM = ['G','AB','R','H','X2B','X3B','HR','RBI','BB','SO','SB','CS','IBB','HBP','SH','SF','GIDP']
+PIT_NUM = ['W','L','G','GS','IPouts','ER','SO','BB','SV','CG','SHO','HR','WP']
+
+
+def load():
+    import pyreadr
+    def tbl(n):
+        return list(pyreadr.read_r(os.path.join(LAHMAN_DIR, n + '.RData')).values())[0]
+    bat, pit, ppl, tms = tbl('Batting'), tbl('Pitching'), tbl('People'), tbl('Teams')
+    bpost, ppost       = tbl('BattingPost'), tbl('PitchingPost')
+    allstar, awards    = tbl('AllstarFull'), tbl('AwardsPlayers')
+
+    names = (ppl.nameFirst.fillna('') + ' ' + ppl.nameLast.fillna('')).str.strip()
+    name_of = dict(zip(ppl.playerID, names))
+    for df, cols in ((bat, BAT_NUM), (pit, PIT_NUM), (bpost, BAT_NUM), (ppost, PIT_NUM)):
+        for c in cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+        df['yearID'] = df.yearID.astype(int)
+    allstar['yearID'] = allstar.yearID.astype(int)
+    awards['yearID']  = awards.yearID.astype(int)
+    return dict(bat=bat, pit=pit, bpost=bpost, ppost=ppost, allstar=allstar,
+                awards=awards, name_of=name_of, gpy=tms.groupby('yearID').G.median())
+
+
+def depth_of(values):
+    """Competition-rank sorted values, return how deep the playable list should go."""
+    if not values:
+        return 0
+    ranks, prev, start = [], None, 0
+    for i, v in enumerate(values):
+        if v != prev:
+            start, prev = i + 1, v
+        ranks.append(start)
+    keep = len(values)
+    for i, r in enumerate(ranks):
+        if r > MAX_DEPTH:
+            keep = i
+            break
+    if not keep:
+        return 0
+    last = ranks[keep - 1]
+    tail = sum(1 for r in ranks[:keep] if r == last)
+    if tail > MAX_TIE_TAIL and last > 1:
+        keep -= tail
+    return max(keep, 0)
+
+
+def num(v):
+    v = float(v)
+    return int(v) if v == int(v) else round(v, 2)
+
+
+def make_side(agg, cat_defs, name_of, y0, extra_cols=()):
+    cols, cats = [], {}
+    for cid, col, label, abbr, since in cat_defs:
+        if y0 < since or col not in agg.columns:
+            continue
+        if col not in cols:
+            cols.append(col)
+        cats[cid] = {'col': col, 'label': label, 'abbr': abbr}
+    if not cats:
+        return None, {}
+    for c in extra_cols:
+        if c in agg.columns and c not in cols:
+            cols.append(c)
+
+    tab = agg[['playerID'] + cols].copy()
+    filled = tab[cols].fillna(0)
+    tab = tab[(filled != 0).any(axis=1)]
+    rows = [[name_of.get(p, p)] + [num(v) for v in vv]
+            for p, vv in zip(tab.playerID, tab[cols].fillna(0).values)]
+
+    for cid, meta in cats.items():
+        i = cols.index(meta['col']) + 1
+        asc = (meta['col'] == 'ERAm')
+        series = [r[i] for r in rows if r[i] > 0]
+        series.sort(reverse=not asc)
+        meta['depth'] = depth_of(series)
+        meta['dir'] = 'asc' if asc else 'desc'
+    cats = {k: v for k, v in cats.items() if v.get('depth', 0) > 0}
+    return {'cols': cols, 'rows': rows}, cats
+
+
+def build(D, y0, y1, post=False):
+    bat_src = D['bpost'] if post else D['bat']
+    pit_src = D['ppost'] if post else D['pit']
+    n_seasons = y1 - y0 + 1
+    sides, cats = {}, {}
+
+    b = bat_src[(bat_src.yearID >= y0) & (bat_src.yearID <= y1)]
+    if len(b):
+        agg = b.groupby('playerID', as_index=False).sum(numeric_only=True)
+        agg['TB']  = agg.H + agg.X2B + 2 * agg.X3B + 3 * agg.HR
+        agg['XBH'] = agg.X2B + agg.X3B + agg.HR
+        agg['B1']  = agg.H - agg.X2B - agg.X3B - agg.HR
+        side, c = make_side(agg, BAT, D['name_of'], y0)
+        if side:
+            sides['bat'] = side
+            cats.update({k: dict(v, side='bat') for k, v in c.items()})
+
+    p = pit_src[(pit_src.yearID >= y0) & (pit_src.yearID <= y1)]
+    if len(p):
+        agg = p.groupby('playerID', as_index=False).sum(numeric_only=True)
+        agg['IP'] = (agg.IPouts / 3.0).round(1)
+        defs = list(PIT)
+        if not post:
+            lg_ip = agg.IPouts.sum() / 3.0
+            lg_era = (agg.ER.sum() * 9.0 / lg_ip) if lg_ip else None
+            sched = float(D['gpy'].loc[(D['gpy'].index >= y0) & (D['gpy'].index <= y1)].sum())
+            min_ip = min(1500, max(40, round(ERA_QUAL_RATE * sched)))
+            if lg_era:
+                ip = agg.IP.replace(0, float('nan'))
+                agg['ERAm'] = ((agg.ER * 9.0 / ip) / lg_era * 100).round(1)
+                agg.loc[agg.IP < min_ip, 'ERAm'] = 0
+                agg['ERAm'] = agg.ERAm.fillna(0)
+                defs = defs + [('pit_era', 'ERAm', f'ERA- (min {min_ip:g} IP)', 'ERA-', 1920)]
+        side, c = make_side(agg, defs, D['name_of'], y0, extra_cols=('IP',))
+        if side:
+            sides['pit'] = side
+            cats.update({k: dict(v, side='pit') for k, v in c.items()})
+
+    if not post and n_seasons >= AWARD_MIN_SEASONS:
+        a = D['allstar']
+        a = a[(a.yearID >= y0) & (a.yearID <= y1)].drop_duplicates(['playerID', 'yearID'])
+        tally = a.groupby('playerID').size().rename('AS').to_frame()
+        aw = D['awards']
+        aw = aw[(aw.yearID >= y0) & (aw.yearID <= y1)]
+        for key, label in AWARD_SRC.items():
+            tally = tally.join(aw[aw.awardID == label].groupby('playerID').size().rename(key),
+                               how='outer')
+        if len(tally):
+            tally = tally.fillna(0).reset_index()
+            side, c = make_side(tally, AWD, D['name_of'], y0)
+            if side:
+                sides['awd'] = side
+                cats.update({k: dict(v, side='awd') for k, v in c.items()})
+
+    return sides, cats
+
+
+def main():
+    D = load()
+    os.makedirs(OUT_DIR, exist_ok=True)
+    ranges = [(y, y, str(y), str(y), 'season') for y in range(FIRST_YEAR, LAST_YEAR + 1)]
+    for d in range(1920, LAST_YEAR + 1, 10):
+        a, b = max(d, FIRST_YEAR), min(d + 9, LAST_YEAR)
+        ranges.append((a, b, f'{a}-{b}', f'{d}s', 'decade'))
+    for a, b in [(1920, 2025), (1947, 2025), (1969, 2025), (1994, 2025),
+                 (2000, 2025), (2010, 2025), (2015, 2025)]:
+        ranges.append((a, b, f'{a}-{b}', f'{a}\u2013{b}', 'span'))
+
+    manifest, total = [], 0
+    for y0, y1, rid, label, kind in ranges:
+        entry = {'id': rid, 'label': label, 'y0': y0, 'y1': y1, 'kind': kind}
+        for post in (False, True):
+            sides, cats = build(D, y0, y1, post)
+            if not cats:
+                continue
+            fn = f'{rid}-post.json' if post else f'{rid}.json'
+            path = os.path.join(OUT_DIR, fn)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump({'id': rid, 'label': label, 'y0': y0, 'y1': y1,
+                           'post': post, 'sides': sides, 'cats': cats},
+                          f, ensure_ascii=False, separators=(',', ':'))
+            sz = os.path.getsize(path); total += sz
+            entry['post' if post else 'reg'] = {'cats': len(cats), 'bytes': sz}
+        if 'reg' in entry or 'post' in entry:
+            manifest.append(entry)
+            print(f"{rid:>12}  reg {entry.get('reg',{}).get('cats',0):>2}c "
+                  f"{entry.get('reg',{}).get('bytes',0)/1024:>7.0f}K   "
+                  f"post {entry.get('post',{}).get('cats',0):>2}c "
+                  f"{entry.get('post',{}).get('bytes',0)/1024:>6.0f}K")
+
+    with open(os.path.join(OUT_DIR, 'manifest.json'), 'w', encoding='utf-8') as f:
+        json.dump({'source': 'Lahman database (cdalzell/Lahman)', 'first': FIRST_YEAR,
+                   'last': LAST_YEAR, 'max_depth': MAX_DEPTH, 'foul_band': FOUL_BAND,
+                   'ranges': manifest}, f, separators=(',', ':'))
+    print(f"\n{len(manifest)} ranges, {total/1024/1024:.1f} MB")
+
+
+if __name__ == '__main__':
+    main()
