@@ -323,8 +323,11 @@
       <h2>How it works</h2>
       <p class="hint">Spin a club and a ten-year window. Everyone who played for
       them in that stretch comes up as a card. Take one, and keep going until you
-      have a full roster: nine in the field, four on the bench, five starters, two
-      in relief and a closer. Three respins of the club, three of the era.</p>
+      have a full roster: <strong>nine hitters</strong> &mdash; the eight positions
+      and a DH &mdash; then <strong>three starters, two in relief and a
+      closer</strong>. Fifteen in all. Three respins of the club, three of the era.</p>
+      <p class="hint">There is no bench, so every hitter has to fit a real
+      position. If a club has nobody you can use, the respin is free.</p>
       <p class="hint">Every card shows OPS+ and ERA−, measured against the leagues
       that player actually played in — a 1968 arm and a 1999 arm arrive
       comparable. Then the roster plays 162 games and you find out how it did.</p>
@@ -344,6 +347,7 @@
       <div class="row" style="justify-content:center;margin-top:12px">
         <button class="btn ghost small shrink" id="sx-respin-team">Respin club</button>
         <button class="btn ghost small shrink" id="sx-respin-era">Respin era</button>
+        <button class="btn small shrink hidden" id="sx-free">Nobody fits &mdash; spin again, free</button>
         <button class="btn ghost small shrink" id="sx-quit">Quit</button>
       </div>
     </div>
@@ -356,6 +360,7 @@
 
     <div class="card">
       <h2>On this club</h2>
+      <div class="pill-set" id="sx-filter"></div>
       <p class="hint" id="sx-count"></p>
       <div id="sx-cards" class="cards"></div>
     </div>

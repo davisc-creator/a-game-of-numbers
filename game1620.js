@@ -12,12 +12,17 @@ const G = {
   ix: null, files: new Map(), players: null,
   seats: [], mode: 'solo', turn: 0, round: 0,
   spin: null, respinTeam: 0, respinEra: 0, done: false, results: null,
+  filter: 'all',
 };
 
+/* Nine in the field and six arms. No bench: every hitter has to fit a real
+   position, which is what makes a good shortstop a decision rather than a
+   freebie. It also means a spin can come up with nobody you can use - see the
+   free respin in renderSpin(). */
+const FIELD = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
 const SLOTS = [
-  ...['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'].map(p => ({k: p, pos: p, kind: 'bat'})),
-  ...[1, 2, 3, 4].map(i => ({k: 'BN' + i, pos: null, kind: 'bat'})),
-  ...[1, 2, 3, 4, 5].map(i => ({k: 'SP' + i, pos: 'SP', kind: 'pit'})),
+  ...FIELD.map(p => ({k: p, pos: p, kind: 'bat'})),
+  ...[1, 2, 3].map(i => ({k: 'SP' + i, pos: 'SP', kind: 'pit'})),
   ...[1, 2].map(i => ({k: 'RP' + i, pos: 'RP', kind: 'pit'})),
   {k: 'CL', pos: 'CL', kind: 'pit'},
 ];
@@ -159,7 +164,6 @@ function openSlots(seat, card){
   return SLOTS.filter(s => {
     if (seat.roster[s.k]) return false;
     if (s.kind !== card.kind) return false;
-    if (!s.pos) return true;                       // bench takes any hitter
     if (card.kind === 'bat') return s.pos === card.pos;
     return s.pos === card.pos || (s.pos === 'RP' && card.pos === 'CL')
         || (s.pos === 'CL' && card.pos === 'RP');
@@ -214,9 +218,8 @@ function simulate(seat){
   const slgP = bats.reduce((a, b) => a + b.slgP * b.pa, 0) / paTot;
   const rs = REF_RPG * obpP * slgP;
 
-  /* innings split: five starters carry about two thirds of a season */
-  const share = {SP1: .13, SP2: .13, SP3: .13, SP4: .13, SP5: .12,
-                 RP1: .13, RP2: .12, CL: .11};
+  /* innings split: three starters carry a little over half a short staff */
+  const share = {SP1: .19, SP2: .19, SP3: .18, RP1: .16, RP2: .15, CL: .13};
   let raM = 0, wsum = 0;
   for (const s of SLOTS.filter(s => s.kind === 'pit')){
     const p = seat.roster[s.k]; if (!p) continue;
@@ -271,6 +274,23 @@ function card(c){
   </button>`;
 }
 
+/* Filters for the card grid: the two sides, then whichever positions this club
+   actually has, then the one that matters most late on - who can I still use. */
+function filterOptions(all, seat){
+  const has = new Set(all.map(c => c.pos));
+  const opts = [{k: 'all', label: 'All'}, {k: 'fits', label: 'Fits an open slot'},
+                {k: 'bat', label: 'Hitters'}, {k: 'pit', label: 'Pitchers'}];
+  for (const p of [...FIELD, 'SP', 'RP', 'CL']) if (has.has(p)) opts.push({k: p, label: p});
+  return opts;
+}
+function applyFilter(all, seat){
+  const f = G.filter;
+  if (f === 'all') return all;
+  if (f === 'bat' || f === 'pit') return all.filter(c => c.kind === f);
+  if (f === 'fits') return all.filter(c => openSlots(seat, c).length);
+  return all.filter(c => c.pos === f);
+}
+
 function renderSpin(){
   const R = G.spin, f = G.ix.franchises[R.franch];
   $$('sx-club').textContent = f ? f.name : R.franch;
@@ -284,15 +304,33 @@ function renderSpin(){
   const seat = me();
   const all = [...R.hitters, ...R.arms];
   const usable = all.filter(c => openSlots(seat, c).length);
-  $$('sx-count').textContent =
-    `${all.length} qualified · ${usable.length} fit an open slot`;
-  $$('sx-cards').innerHTML = all.length
-    ? all.map(c => {
+
+  const opts = filterOptions(all, seat);
+  if (!opts.some(o => o.k === G.filter)) G.filter = 'all';
+  $$('sx-filter').innerHTML = opts.map(o =>
+    `<button class="pill" data-f="${o.k}" aria-pressed="${G.filter === o.k}">${o.label}</button>`).join('');
+  $$('sx-filter').querySelectorAll('[data-f]').forEach(el => el.onclick = () => {
+    G.filter = el.dataset.f; renderSpin();
+  });
+
+  const shown = applyFilter(all, seat);
+  $$('sx-count').textContent = usable.length
+    ? `${all.length} qualified · ${usable.length} fit an open slot` +
+      (G.filter === 'all' ? '' : ` · showing ${shown.length}`)
+    : `${all.length} qualified, but none of them fits a slot you still have open.`;
+
+  /* with no bench a club can genuinely be useless to you, so that respin is
+     free - otherwise the draft can dead-end with the roster half filled */
+  $$('sx-free').classList.toggle('hidden', usable.length > 0);
+
+  $$('sx-cards').innerHTML = shown.length
+    ? shown.map(c => {
         const fits = openSlots(seat, c).length > 0;
         return card(c).replace('<button class="pcard"',
           `<button class="pcard${fits ? '' : ' dim'}"${fits ? '' : ' disabled'}`);
       }).join('')
-    : '<p class="hint">Nobody on this club cleared the playing-time floor. Respin.</p>';
+    : `<p class="hint">${all.length ? 'Nobody matches that filter.'
+        : 'Nobody on this club cleared the playing-time floor.'}</p>`;
   $$('sx-cards').querySelectorAll('[data-id]').forEach(el => el.onclick = () => {
     const c = all.find(x => String(x.id) === el.dataset.id && x.kind === el.dataset.kind);
     if (c) take(c);
@@ -390,6 +428,7 @@ function wire1620(){
     if (G.respinEra >= RESPINS) return;
     G.respinEra++; await doSpin({team: false, era: true});
   };
+  $$('sx-free').onclick = () => doSpin();
   $$('sx-quit').onclick = () => {
     if (G.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
     showScreen('setup');

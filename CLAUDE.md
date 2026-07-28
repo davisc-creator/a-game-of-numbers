@@ -328,9 +328,23 @@ Not requested yet; the owner will direct priorities.
 ## 162-0
 
 Spin a franchise and a rolling ten-year window, take one player off that club,
-repeat until the roster is full — 9 in the field, 4 on the bench, 5 starters, 2
-in relief, 1 closer — then play a season with it. Three respins of the club,
-three of the era.
+repeat until the roster is full, then play a season with it. Three respins of
+the club, three of the era.
+
+**The roster is 15**: nine hitters — the eight positions and a DH — then three
+starters, two in relief and a closer. **There is no bench**, so every hitter has
+to fit a real position, which is what makes a good shortstop a decision rather
+than a freebie.
+
+No bench also means a spin can come up genuinely useless to you: over 40
+simulated drafts, 2 spins in 602 (0.3%) offered nobody who fitted an open slot.
+That respin is free — `sx-free` — because otherwise a draft can dead-end with
+the roster half filled and the paid respins gone. No simulated draft failed to
+complete; the average was 15.1 spins for 15 slots.
+
+The card grid filters by side, by any position the club actually has, and by
+"fits an open slot", which is the one that matters late in a draft. Filters that
+would show an empty grid are not offered.
 
 **Era normalization is the whole game.** League batting average was .296 in 1930
 and .237 in 1968. On raw numbers every optimal roster is a 1930s roster and the

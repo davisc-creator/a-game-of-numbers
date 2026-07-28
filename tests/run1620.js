@@ -50,8 +50,9 @@ function load(){
   };
   sandbox.globalThis = sandbox;
   const api = vm.runInNewContext(
-    src + `\n;({G, SLOTS, roster, leagueOver, spinnable, simulate, openSlots, take,
-             start1620, doSpin, WINDOW, MIN_AB, MIN_OUTS, REF_RPG})`,
+    src + `\n;({G, SLOTS, FIELD, roster, leagueOver, spinnable, simulate, openSlots, take,
+             start1620, doSpin, WINDOW, MIN_AB, MIN_OUTS, REF_RPG,
+             filterOptions, applyFilter})`,
     sandbox, {filename: 'game1620.js'});
   api.__registered = () => registered;
   return api;
@@ -152,17 +153,56 @@ const app = load();
       seat.roster[slot.k] = {...fits, from: 'test'};
       seat.picks++;
     }
-    eq(seat.picks, 21, 'a full roster is 21 players');
-    eq(app.SLOTS.filter(s => s.kind === 'bat').length, 13, '13 hitters');
-    eq(app.SLOTS.filter(s => s.pos === 'SP').length, 5, '5 starters');
+    eq(seat.picks, 15, 'a full roster is 15 players');
+    eq(app.SLOTS.filter(s => s.kind === 'bat').length, 9, '9 hitters');
+    eq(app.SLOTS.filter(s => s.pos === 'SP').length, 3, '3 starters');
     eq(app.SLOTS.filter(s => s.pos === 'RP').length, 2, '2 in relief');
     eq(app.SLOTS.filter(s => s.pos === 'CL').length, 1, '1 closer');
+    eq(app.SLOTS.filter(s => !s.pos).length, 0, 'and no bench — every hitter fits a real position');
+    eq(app.SLOTS.map(s => s.k).filter(k => /^BN/.test(k)), [], 'no bench slots survive');
     ok(['C','1B','2B','3B','SS','LF','CF','RF','DH'].every(p => {
       const f = seat.roster[p];
       return f && f.pos === p;
     }), 'every fielding slot holds a player who actually played there');
     ok(app.SLOTS.filter(s => s.kind === 'pit').every(s => seat.roster[s.k].kind === 'pit'),
        'no hitters on the pitching staff');
+
+    group('card filters');
+    {
+      const fresh = {name: 'F', roster: {}, picks: 0};
+      const all = [...R.hitters, ...R.arms];
+      const opts = app.filterOptions(all, fresh).map(o => o.k);
+      eq(opts.slice(0, 4), ['all', 'fits', 'bat', 'pit'], 'the two sides and a fits filter come first');
+      ok(opts.includes('SP') && opts.includes('CL'), 'pitcher roles are offered');
+      ok(app.FIELD.some(p => opts.includes(p)), 'and the positions this club actually has');
+      ok(opts.every(k => k === 'all' || k === 'fits' || k === 'bat' || k === 'pit'
+                      || all.some(c => c.pos === k)),
+         'no filter is offered that would show an empty grid');
+
+      const was = app.G.filter;
+      app.G.filter = 'all';
+      eq(app.applyFilter(all, fresh).length, all.length, 'all shows everyone');
+      app.G.filter = 'bat';
+      ok(app.applyFilter(all, fresh).every(c => c.kind === 'bat'), 'hitters shows only hitters');
+      eq(app.applyFilter(all, fresh).length, R.hitters.length, 'and all of them');
+      app.G.filter = 'pit';
+      ok(app.applyFilter(all, fresh).every(c => c.kind === 'pit'), 'pitchers shows only pitchers');
+      app.G.filter = 'SS';
+      ok(app.applyFilter(all, fresh).every(c => c.pos === 'SS'), 'a position filter shows only that position');
+      app.G.filter = 'CL';
+      ok(app.applyFilter(all, fresh).every(c => c.pos === 'CL'), 'and that holds for pitcher roles');
+      app.G.filter = 'fits';
+      const fits = app.applyFilter(all, fresh);
+      ok(fits.every(c => app.openSlots(fresh, c).length), 'the fits filter shows only usable cards');
+      eq(fits.length, all.filter(c => app.openSlots(fresh, c).length).length, 'and all of them');
+
+      /* on a full roster nothing fits, which is what the free respin is for */
+      const full = {name: 'X', roster: {}, picks: 0};
+      for (const s of app.SLOTS) full.roster[s.k] = {kind: s.kind, pos: s.pos, name: 'x'};
+      app.G.filter = 'fits';
+      eq(app.applyFilter(all, full).length, 0, 'a full roster fits nothing');
+      app.G.filter = was;
+    }
 
     group('simulation');
     const m = app.simulate(seat);
