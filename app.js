@@ -1853,7 +1853,10 @@ function wire(){
     renderRecords();
   });
   $('rec-export').onclick = () => {
-    const blob = new Blob([JSON.stringify(RECORDS)], {type: 'application/json'});
+    /* Blob encodes UTF-8 either way; the charset is declared for the tools that
+       read the file afterwards and would otherwise sniff it as Latin-1, which
+       is what turns "Acuña" into "AcuÃ±a". */
+    const blob = new Blob([JSON.stringify(RECORDS)], {type: 'application/json;charset=utf-8'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `game-100-records-${new Date().toISOString().slice(0,10)}.json`;

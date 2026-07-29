@@ -54,6 +54,7 @@ build_lists.py        regenerates data/ from the Lahman database
 tests/run.js          Game 100 suite, no dependencies, not shipped to the page
 tests/run1620.js      162-0 suite
 tests/run-shell.js    both games in one context: load order, switching, id collisions
+tests/run-sw.js       the service worker, against a stub CacheStorage
 data-teams/<year>.json  one row per player per franchise per season, full stat set
 data-teams/<year>-post.json  postseason equivalent
 data-teams/index.json   franchises, their seasons, and league context per year
@@ -335,6 +336,29 @@ their offline eras.
 Keep the split. If you ever go back to cache-first for the shell, bump `SHELL`
 on every single deploy or changes will not reach installed phones.
 
+**Only good responses are cached** (2026-07-29). `Cache.put` stores a 404 as
+happily as a 200, and under cache-first that entry is then served for ever — one
+bad moment during a deploy and that file is broken on that device permanently,
+with nothing on screen to say so. `keep()` writes only when `res.ok`, and the
+data branch also checks `hit.ok` on the way *in*, so a cache poisoned before this
+landed steps over the bad entry and replaces it. That read-side check is why
+`DATA` did not need a version bump to fix it — bumping would have cost everyone
+their offline eras.
+
+**A stale worker cannot be fixed from the server.** The 2026-07-28 fix only
+takes effect once the new `sw.js` installs; an installed home-screen app that is
+never fully terminated may never re-check, and stays pinned to the old worker
+indefinitely. That happened: on 2026-07-28 a phone still running the pre-19:34
+`app.js` wrote four games' records in the old shape — no `picked[].i`, no
+`y0`/`y1`, no `misses` — hours after the fix was live. Nothing deployable
+reaches such a device; the caches have to be cleared on it. Clearing website
+data also clears `localStorage`, so **export the records first** or they are
+gone.
+
+`tests/run-sw.js` covers all of this against a stub `CacheStorage`. It was
+written after the fact and checked the honest way: run against the previous
+`sw.js` it fails six of its assertions, all of them the real defects.
+
 ---
 
 ## Possible next steps
@@ -359,10 +383,12 @@ Not requested yet; the owner will direct priorities.
 - Test locally with `python3 -m http.server 8000` — `file://` fails because the
   app fetches JSON.
 - Verify with `node --check app.js` after edits.
-- **Run all three suites before every commit** — `node tests/run.js`,
-  `node tests/run1620.js`, `node tests/run-shell.js`. 434 assertions, no
+- **Run all four suites before every commit** — `node tests/run.js`,
+  `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
+  455 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
-  rather than requiring any test scaffolding inside `app.js` — keep it that way.
+  rather than requiring any test scaffolding inside `app.js` — keep it that way,
+  and the same for `sw.js` against a stub `CacheStorage`.
   The last third of the suite walks all 247 data files and builds all 7,331
   category boards, so it catches data regressions as well as logic ones.
 - Comments explain *why* a thing is unusual, not what the line does. Match that.
