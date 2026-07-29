@@ -61,6 +61,68 @@ function lev(a, b){
   return prev[n];
 }
 
+/* Nicknames Lahman does not carry. Keys are already normalised, so "A-Rod",
+   "a rod" and "ARod" all arrive here as the same string. Only names that are
+   genuinely better known by the nickname earn a place, and only when the
+   nickname points at exactly one man - "Pudge" is Fisk and Rodriguez, "Doc" is
+   Gooden and Halladay, so neither is here. An alias is a spelling shortcut, not
+   a hint: it resolves to a name and that name then scores, fouls or strikes on
+   its own merits like any other. */
+const ALIASES = {
+  'a rod': 'alex rodriguez', 'arod': 'alex rodriguez',
+  'k rod': 'francisco rodriguez', 'krod': 'francisco rodriguez',
+  'big papi': 'david ortiz', 'papi': 'david ortiz',
+  'charlie hustle': 'pete rose',
+  'mr october': 'reggie jackson',
+  'the babe': 'babe ruth', 'bambino': 'babe ruth', 'sultan of swat': 'babe ruth',
+  'say hey kid': 'willie mays', 'the say hey kid': 'willie mays',
+  'hammerin hank': 'hank aaron', 'hammering hank': 'hank aaron',
+  'the big unit': 'randy johnson', 'big unit': 'randy johnson',
+  'the big hurt': 'frank thomas', 'big hurt': 'frank thomas',
+  'king felix': 'felix hernandez',
+  'joltin joe': 'joe dimaggio', 'yankee clipper': 'joe dimaggio',
+  'the yankee clipper': 'joe dimaggio', 'joltin joe dimaggio': 'joe dimaggio',
+  'splendid splinter': 'ted williams', 'the splendid splinter': 'ted williams',
+  'teddy ballgame': 'ted williams',
+  'stan the man': 'stan musial',
+  'the iron horse': 'lou gehrig', 'iron horse': 'lou gehrig',
+  'the ryan express': 'nolan ryan', 'ryan express': 'nolan ryan',
+  'mr cub': 'ernie banks',
+  'the mick': 'mickey mantle',
+  'the rocket': 'roger clemens', 'rocket': 'roger clemens',
+  'big mac': 'mark mcgwire',
+  'the freak': 'tim lincecum',
+  'crime dog': 'fred mcgriff', 'the crime dog': 'fred mcgriff',
+  'kung fu panda': 'pablo sandoval',
+  'thor': 'noah syndergaard',
+  'el duque': 'orlando hernandez',
+  'hebrew hammer': 'shawn green', 'the hebrew hammer': 'shawn green',
+  'the kid': 'ken griffey', 'junior': 'ken griffey',
+  'the man of steal': 'rickey henderson', 'man of steal': 'rickey henderson',
+  'mad dog': 'greg maddux',
+  'the wizard': 'ozzie smith', 'the wizard of oz': 'ozzie smith',
+  'the big train': 'walter johnson', 'big train': 'walter johnson',
+  'catfish': 'jim hunter',
+  'eck': 'dennis eckersley',
+  'the iron man': 'cal ripken', 'iron man': 'cal ripken',
+  'mr padre': 'tony gwynn',
+  'vlad': 'vladimir guerrero',
+  'miggy': 'miguel cabrera',
+  'the machine': 'albert pujols',
+  'cool papa': 'cool papa bell',
+  'sho': 'shohei ohtani', 'shotime': 'shohei ohtani', 'showtime': 'shohei ohtani',
+  'pops': 'willie stargell',
+};
+
+/* Career span for a pool entry, when players.json happens to be loaded. It is
+   the only thing the near-miss chooser is allowed to show alongside a name -
+   see askCandidates. Returns null rather than throwing when it is not, so
+   buildPool stays usable without the shared files (the suite does that). */
+function spanOf(e){
+  const p = CX.players;
+  return (p && p.s && e && e.id != null) ? (p.s[e.id] || null) : null;
+}
+
 /* ------------------------------------------------------------------ data */
 async function loadManifest(){
   S.manifest = await (await fetch('data/manifest.json')).json();
@@ -77,6 +139,9 @@ async function loadRange(){
   $('start-note').textContent = 'Loading\u2026';
   $('start').disabled = true;
   const yrs = activeYears();
+  /* The near-miss chooser shows career spans, which only players.json carries.
+     Non-fatal on purpose: without it the chooser still works, just names only. */
+  try { await loadShared(); } catch(e){ /* spans stay unavailable */ }
   try{
     S.data = S.teams.length && yrs
       ? (S.teamMode === 'only'
@@ -498,13 +563,18 @@ function buildPool(){
                                 id: idOf.has(r) ? idOf.get(r) : null});
 
   const all = board.concat(foul, off);
-  const byName = new Map(), byLast = new Map();
+  const byName = new Map(), byLast = new Map(), byFirst = new Map();
   for (const e of all){
-    const n = norm(e.name), l = lastOf(e.name);
+    const n = norm(e.name), l = lastOf(e.name), f = firstOf(e.name);
     (byName.get(n) || byName.set(n, []).get(n)).push(e);
     (byLast.get(l) || byLast.set(l, []).get(l)).push(e);
+    /* First names index a much flatter space than last names - hundreds of
+       Mikes - so this is only ever consulted when it points at one man. It
+       exists for the mononyms: everybody calls Ichiro Suzuki "Ichiro", and
+       before this the game told them he never played. */
+    (byFirst.get(f) || byFirst.set(f, []).get(f)).push(e);
   }
-  return {board, foul, byName, byLast, abbr: cat.abbr, label: cat.label,
+  return {board, foul, all, byName, byLast, byFirst, abbr: cat.abbr, label: cat.label,
           depth: SCORE_TO, foulTo: FOUL_TO, listDepth: cat.depth,
           open: board.length, total: scored.length};
 }
@@ -512,8 +582,9 @@ function buildPool(){
 /* Board first, then the foul band, then everyone else. Ambiguity only
    matters when a pick could actually score, so board entries win ties. */
 function resolve(raw){
-  const q = norm(raw);
-  if (!q) return {k: 'empty'};
+  const q0 = norm(raw);
+  if (!q0) return {k: 'empty'};
+  const q = ALIASES[q0] || q0;
   const P = S.G.pool;
 
   const bestOf = l => l.reduce((a, b) => (a.rank <= b.rank ? a : b));
@@ -563,15 +634,48 @@ function resolve(raw){
     if (r) return r;
   }
 
-  // fuzzy, but only against players who could actually score
-  let best = null, bestD = 99;
-  for (const e of P.board){
-    if (e.drafted) continue;
-    const d = Math.min(lev(q, norm(e.name)), lev(q, lastOf(e.name)));
-    if (d < bestD){ bestD = d; best = e; }
+  /* A bare first name, but only when it names one man. Anything ambiguous is
+     dropped rather than reported, because listing every Mike in the era would
+     both be useless and read out a chunk of the board. */
+  if (tok.length === 1 && P.byFirst){
+    const one = P.byFirst.get(q) || [];
+    if (one.length === 1) return pick(one) || {k: 'none'};
+    const live = one.filter(e => e.zone === 'board' && !e.drafted);
+    if (live.length === 1 && new Set(one.map(e => norm(e.name))).size === 1) return pick(one) || {k: 'none'};
   }
-  if (best && bestD <= (q.length <= 5 ? 1 : 2)) return {k: 'suggest', e: best};
+
+  const near = candidates(q, P);
+  if (near.length === 1) return {k: 'suggest', e: near[0]};
+  if (near.length > 1)   return {k: 'candidates', list: near, q};
   return {k: 'none'};
+}
+
+/* Near misses for a query that matched nothing outright.
+   Drawn from the WHOLE era - the top 100, the foul band and the hundreds who
+   rank below - never from the board alone. That is the difference between
+   fixing a spelling and handing over an answer: because a name being offered
+   says nothing about whether it scores, the list cannot be fished. Sorted by
+   edit distance and then alphabetically, deliberately never by rank. */
+function candidates(q, P, limit = 5){
+  const cap = q.length <= 4 ? 1 : q.length <= 7 ? 2 : 3;
+  const out = [];
+  for (const e of (P.all || [])){
+    const n = norm(e.name);
+    if (n === q) continue;              // an exact match would have resolved already
+    const d = Math.min(lev(q, n), lev(q, lastOf(e.name)), lev(q, firstOf(e.name)));
+    if (d <= cap) out.push({e, d});
+  }
+  if (!out.length) return [];
+  out.sort((a, b) => a.d - b.d || (a.e.name < b.e.name ? -1 : a.e.name > b.e.name ? 1 : 0));
+  /* Getting here means neither the full name nor the last name matched exactly,
+     so a distance of nought can only be a shared first name. A crowd of those is
+     ambiguity, not a misspelling - "Mike" is four hundred men and no five of them
+     are a useful answer - so say nothing rather than offer an arbitrary handful.
+     Volume alone cannot make this call: "jonson" is as populous as "mike" and is
+     a genuine typo. The distance is what tells them apart. */
+  const best = out[0].d;
+  if (best === 0 && out.filter(x => x.d === 0).length > limit) return [];
+  return out.slice(0, limit).map(x => x.e);
 }
 
 /* ------------------------------------------------------------------ game */
@@ -620,9 +724,18 @@ function advance(){
 }
 
 function submitGuess(){
-  const box = $('guess'), raw = box.value;
-  const r = resolve(raw);
+  const raw = $('guess').value;
   clearConfirm();
+  apply(resolve(raw), raw);
+}
+
+/* Acting on a resolution, split out of submitGuess so that a name picked from
+   the near-miss chooser re-enters the same path instead of duplicating the zone
+   rules. That is what keeps a chosen name honest: the chooser only settles how
+   the name was spelled, and the pick then scores, fouls or strikes on its own
+   merits exactly as if it had been typed correctly. */
+function apply(r, raw){
+  const box = $('guess');
   if (r.k === 'empty'){ setMsg('Type a name first.', 'warn'); return; }
   if (r.k === 'taken' || r.k === 'missed' || r.k === 'ambiguous') S.G.tries++;
   if (r.k === 'taken'){
@@ -638,11 +751,16 @@ function submitGuess(){
     box.value = ''; focusGuess(); return;
   }
   if (r.k === 'choose') return askChoose(r.list);
-  if (r.k === 'suggest') return askConfirm(r.e, raw);
+  if (r.k === 'candidates'){ S.G.tries++; return askCandidates(r.list, raw); }
+  if (r.k === 'suggest'){ S.G.tries++; return askConfirm(r.e, raw); }
   if (r.k === 'hit')  return score(r.e);
   if (r.k === 'foul') return foul(r.e);
   return strike(raw, r.k === 'off' ? r.e : null);
 }
+
+/* Re-enter the turn through the name itself, so a chosen candidate obeys every
+   rule a typed name obeys - drafted, already missed, foul band, off the list. */
+const takeNamed = e => apply(resolve(e.name), e.name);
 
 /* Two different men, one name. Team and career span are the only things shown -
    a rank or a stat line here would hand over the answer the game is asking for. */
@@ -676,7 +794,7 @@ function askConfirm(e, raw){
       <button class="btn small" id="c-yes">Yes, that's my pick</button>
       <button class="btn ghost small" id="c-no">No, that's not it</button>
     </div>`;
-  $('c-yes').onclick = () => { clearConfirm(); e.drafted ? (setMsg('Already off the board.', 'warn'), focusGuess()) : score(e); };
+  $('c-yes').onclick = () => { clearConfirm(); takeNamed(e); };
   $('c-no').onclick  = () => {
     clearConfirm();
     // re-resolve ignoring the board so a near-miss can still be looked up
@@ -686,6 +804,33 @@ function askConfirm(e, raw){
     if (f) return foul(f);
     strike(raw, cand.find(x => x.zone === 'off') || null);
   };
+}
+
+/* Several plausible readings of what was typed. Career span only - no rank, no
+   stat, no team - for the same reason the namesake chooser shows none: anything
+   more would answer the question the game is asking. The names come from the
+   whole era rather than the board, so the list itself gives nothing away.
+   Picking costs no strike; "None of these" means the name really was not one of
+   these, which is the ordinary miss it always was. */
+function askCandidates(list, raw){
+  const typed = (raw || '').trim().slice(0, 28);
+  $('confirm-slot').innerHTML = `
+    <div class="msg warn" style="margin-top:12px">
+      <div style="margin-bottom:8px">No exact match for <strong>${esc(typed)}</strong>. Did you mean one of these?</div>
+      <div class="choose">
+        ${list.map((e, i) => `<button class="btn small" data-pick="${i}">
+             ${esc(e.name)}${spanOf(e) ? ` <span class="mono">${esc(spanOf(e))}</span>` : ''}
+           </button>`).join('')}
+        <button class="btn ghost small" data-pick="none">None of these</button>
+      </div>
+      <div class="mono" style="margin-top:8px;opacity:.7">No strike for picking — the name still has to be on the list to score.</div>
+    </div>`;
+  $('confirm-slot').querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
+    const v = el.dataset.pick;
+    clearConfirm();
+    if (v === 'none') return strike(raw, null);
+    takeNamed(list[+v]);
+  });
 }
 
 function score(e){

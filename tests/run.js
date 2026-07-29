@@ -89,6 +89,7 @@ function loadApp(){
    renderSeries, renderSeriesHistory, buildTeamRange, buildTeamMembers,
    teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
+   candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -813,6 +814,88 @@ group('names as people actually type them');
   ok(mixed.length > 0, `${mixed.length} of them are spelled differently on the page`);
   ok(mixed.every(([, ix]) => ix.every(i => who[i])),
      'including the ones whose display names differ — the old rule missed these');
+}
+
+group('misspellings, mononyms and nicknames');
+{
+  const d = JSON.parse(fs.readFileSync(path.join(DATA, '2000-2025.json'), 'utf8'));
+  app.S.data = d; app.S.catId = 'bat_h'; app.S.rangeId = '2000-2025';
+  app.S.post = false; app.S.seats = ['A', 'B']; app.S.rounds = 12;
+  app.startGame(); app.__drain();
+
+  /* the reported bug: "Ichiro" was told he never played. He was third. */
+  const ich = app.resolve('Ichiro');
+  eq(ich.k, 'hit', 'a bare first name finds the mononym');
+  eq(ich.e.name, 'Ichiro Suzuki', 'and finds the right man');
+  eq(app.resolve('Ichiro Suzuki').k, 'hit', 'the full name still works');
+
+  const ar = app.resolve('A-Rod');
+  eq(ar.k, 'hit', 'a nickname resolves');
+  eq(ar.e.name, 'Alex Rodriguez', 'to the right man');
+  eq(app.resolve('arod').e.name, 'Alex Rodriguez', 'however it is punctuated');
+  eq(app.resolve('Big Papi').e.name, 'David Ortiz', 'and so does another');
+
+  const g = app.resolve('guerero');
+  eq(g.k, 'candidates', 'a misspelling offers a list rather than a strike');
+  ok(g.list.length > 1 && g.list.length <= 5, `${g.list.length} offered, capped at five`);
+  ok(g.list.some(e => e.name === 'Vladimir Guerrero'), 'including the man actually meant');
+
+  /* the whole point of drawing from the era rather than the board: being
+     offered a name has to say nothing about whether that name scores */
+  const probes = ['guerero', 'rodrigez', 'martines', 'jonson', 'wiliams', 'sanchz',
+                  'gonzales', 'hernandes', 'ramires', 'perex', 'lopes', 'molena'];
+  let offered = 0, onBoard = 0;
+  for (const q of probes){
+    const r = app.resolve(q);
+    if (r.k !== 'candidates') continue;
+    for (const e of r.list){ offered++; if (e.zone === 'board') onBoard++; }
+  }
+  ok(offered > 20, `${offered} names offered across the probes`);
+  ok(onBoard / offered < 0.35,
+     `only ${Math.round(onBoard / offered * 100)}% of them can score — the list cannot be fished`);
+
+  /* a first name shared by hundreds is ambiguity, not a misspelling. Volume
+     alone cannot tell the two apart, so the distance has to. */
+  eq(app.resolve('Mike').k, 'none', 'a crowded first name offers nothing');
+  eq(app.resolve('Zzzqqqwww').k, 'none', 'nor does nonsense');
+}
+{
+  /* an alias pointing at nobody is a silent dead end, and an alias that happens
+     to be somebody's actual name would shadow that man */
+  const players = JSON.parse(fs.readFileSync(path.join(DATA, 'players.json'), 'utf8'));
+  const known = new Set(players.n.map(app.norm));
+  const dead = Object.entries(app.ALIASES).filter(([, v]) => !known.has(v)).map(([k]) => k);
+  eq(dead.slice(0, 3), [], `all ${Object.keys(app.ALIASES).length} aliases point at a real player`);
+  const shadow = Object.keys(app.ALIASES).filter(k => known.has(k));
+  eq(shadow.slice(0, 3), [], 'and none of them shadows a real name');
+}
+{
+  /* choosing settles how the name was spelled and nothing else */
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  app.takeNamed(G.pool.all.find(e => e.zone === 'off')); app.__drain();
+  eq(G.players[0].strikes, 1, 'a chosen name that is off the list still strikes');
+}
+{
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  app.takeNamed(G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();
+  eq(G.players[0].pts, 3, 'a chosen board name scores its own rank');
+  eq(G.players[0].strikes, 0, 'and costs no strike');
+}
+{
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  app.takeNamed(G.pool.foul[0]); app.__drain();
+  eq(G.players[0].fouls, 1, 'and a chosen foul-band name still fouls');
+}
+{
+  /* the chooser may show a career span and nothing else — a rank or a stat here
+     hands over the answer the game is asking for, exactly as in askChoose */
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  app.askCandidates([G.pool.board.find(e => e.name === 'Hank Aaron')], 'hank aron');
+  const html = app.__els.get('confirm-slot').innerHTML;
+  ok(/Hank Aaron/.test(html), 'the chooser names the candidate');
+  ok(!/rank/i.test(html), 'and never says rank');
+  const visible = html.replace(/<[^>]*>/g, ' ');
+  ok(!/\d/.test(visible), 'no number reaches the screen — not the rank, not the stat');
 }
 
 group('shipped data');

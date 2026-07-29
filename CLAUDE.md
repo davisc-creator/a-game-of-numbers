@@ -135,7 +135,8 @@ value and rank, which needs every player, not just the ranked ones.
   because what has already been burned is half the information in the room.
   This replaces the older rule that a used foul cost a strike the second time.
 - Already-drafted names and ambiguous last names cost nothing and re-prompt.
-- Near misses get one "did you mean?" confirmation before a strike lands.
+- Near misses get a "did you mean?" confirmation before a strike lands — one
+  name if only one is close, otherwise a list of up to five.
 
 **The cut has to stay visible.** The depth is in the game header (`g-depth`) and
 every scored pick says "Nth of DEPTH". It used to appear only on the opening
@@ -146,6 +147,47 @@ The rank *is* the score by design; the boundary being invisible was the defect.
 Name matching (`norm`, `resolve` in app.js) strips accents and punctuation,
 resolves bare last names when only one board player matches, handles
 "first-initial lastname", and falls back to Levenshtein distance.
+
+Three later additions, in the order `resolve` tries them:
+
+- **Nicknames** (`ALIASES`). Lahman carries none, so the table is hand-built —
+  67 entries, keys already normalised so "A-Rod", "a rod" and "ARod" all arrive
+  as one string. A name earns a place only when the nickname is genuinely more
+  famous *and* points at one man: "Pudge" is Fisk and Rodriguez, "Doc" is Gooden
+  and Halladay, so neither is there. The suite asserts every alias resolves to a
+  real player and that none shadows somebody's actual name.
+- **Bare first names**, but only when they name one man. This is the mononym
+  case: everyone says "Ichiro", and before this the game answered that Ichiro
+  Suzuki — third on the 2000–2025 hit list — never played. Anything ambiguous is
+  dropped silently rather than reported, because listing every Mike in the era
+  would be useless and would read out a chunk of the board.
+- **A near-miss chooser** (`candidates`, `askCandidates`) for everything else.
+
+**The near-miss chooser draws from the whole era, never from the board.** This
+is the difference between fixing a spelling and handing over an answer. Because
+the top 100, the foul band and the hundreds below it are all eligible, a name
+being offered says nothing about whether it scores — across the suite's probes
+about 6% of offered names are on the board, so the list cannot be fished. Narrow
+it to board members to "improve" the suggestions and it becomes the autocomplete
+that was deliberately refused.
+
+Two more things hold that line and are easy to undo:
+
+- **Candidates sort by edit distance, then alphabetically. Never by rank.**
+- **A distance of nought is ambiguity, not a misspelling.** Reaching
+  `candidates` means neither the full name nor the last name matched exactly, so
+  an exact hit can only be a shared first name; more than five of those means
+  the query was a crowded first name and nothing is offered. Volume cannot make
+  this call — "jonson" matches 340 men and is a real typo, "mike" matches 401
+  and is not. The distance is what separates them.
+
+Picking a candidate costs an attempt but no strike, and then re-enters the turn
+through `takeNamed` → `resolve(e.name)` → `apply`, so a chosen name obeys every
+rule a typed one does: drafted, already missed, foul band, off the list. That
+routing is the point — an earlier `askConfirm` scored its suggestion directly,
+which would have quietly awarded points for a man ranked 400th once suggestions
+stopped coming from the board alone. "None of these" is the ordinary miss it
+always was, and strikes.
 
 Three rules in `norm` that look fussy and are each load-bearing:
 
@@ -194,10 +236,14 @@ handled.
   a list showing team and career span. Where Lahman cannot tell the namesakes
   apart (8 cases in the whole set) it awards the better rank instead, because
   asking an unanswerable question would strand the slots.
-- **The chooser must never show a rank or a stat.** Team and career span only.
-  Anything else hands over the answer the game is asking for. This is also why
-  there is no general autocomplete: suggesting board names as you type would
-  turn the draft into reading the leaderboard.
+- **Neither chooser may ever show a rank or a stat.** The namesake chooser shows
+  team and career span; the near-miss chooser shows the span alone. Anything
+  else hands over the answer the game is asking for, and the suite asserts no
+  number reaches the screen at all. This is also why there is no general
+  autocomplete: suggesting board names *as you type* would turn the draft into
+  reading the leaderboard. The near-miss list is not that — it fires only on
+  submit, only when nothing matched outright, and it is drawn from the whole era
+  rather than the board.
 - **Data ends at 2025.** Lahman has no 2026.
 
 Regenerating data needs `pip install pandas pyreadr` and the Lahman tarball
@@ -314,7 +360,7 @@ Not requested yet; the owner will direct priorities.
   app fetches JSON.
 - Verify with `node --check app.js` after edits.
 - **Run all three suites before every commit** — `node tests/run.js`,
-  `node tests/run1620.js`, `node tests/run-shell.js`. 202 assertions, no
+  `node tests/run1620.js`, `node tests/run-shell.js`. 425 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way.
   The last third of the suite walks all 247 data files and builds all 7,331
