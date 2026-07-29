@@ -298,6 +298,18 @@ Two things to preserve when touching this:
 - **Export/import merges by `ts`.** Re-importing the same file is harmless.
   Do not switch to index-based merging.
 
+**Past games open in place on the Records screen.** `#hist-list` used to render
+each game as an inert `<div>` — it looked tappable and did nothing, and the
+per-game detail existed only inside one person's profile. That is also the one
+place it cannot be complete: a profile is one person by definition, so it can
+never show what the other drafters picked in the same game. Tapping a row now
+shows every drafter, their picks sorted by rank, and their misses.
+
+`histPicks` handles the three record shapes people actually have, and reports
+which one it is rather than rendering an empty game: picks with names, an older
+record carrying only `ranks`, and one written before the miss list existed —
+the same rule the breakdowns follow.
+
 Records are per-device. There is no sync and no backend, by design — nothing a
 player does is sent anywhere. Moving them between devices is Export on one and
 Import on the other; the merge is by `ts`, so importing the same file twice is
@@ -414,7 +426,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  485 assertions, no
+  499 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.

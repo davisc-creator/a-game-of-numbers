@@ -1387,16 +1387,58 @@ function renderRecords(){
   renderSeriesHistory();
   const h = [...RECORDS].reverse().slice(0, 40);
   $('hist-empty').classList.toggle('hidden', h.length > 0);
-  $('hist-list').innerHTML = h.map(g => {
+  /* Every game opens. The per-game detail used to live only inside one person's
+     profile, which meant the game list on this screen looked tappable and did
+     nothing - and it is the obvious place to ask "what happened in that game".
+     Opening here shows every drafter at once, which the profile cannot: a
+     profile is one person by definition. */
+  $('hist-list').innerHTML = h.map((g, i) => {
     const o = [...(g.players||[])].sort((a,b) => b.pts - a.pts);
-    return `<div class="hist">
-      <div class="top">
-        <div class="cat">${esc(g.label || g.cat)} <span class="mono">${esc(g.range||'')}${g.post?' post':''}</span></div>
-        <div class="when">${new Date(g.ts).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+    return `<div class="hist-row">
+      <button class="hist tappable" data-hist="${i}" aria-expanded="false" aria-controls="hist-body-${i}">
+        <div class="top">
+          <div class="cat">${esc(g.label || g.cat)} <span class="mono">${esc(g.range||'')}${g.post?' post':''}${g.solo?' \u00b7 solo':''}</span></div>
+          <div class="when">${new Date(g.ts).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+        </div>
+        <div class="line">${o.map((p,n) => `${n===0 && !g.solo ?'\u2605 ':''}${esc(p.name)} ${p.pts}`).join('   \u00b7   ')}</div>
+      </button>
+      <div class="hist-body hidden" id="hist-body-${i}">
+        ${o.map(p => `
+          <div class="hb-who">${esc(p.name)}
+            <span class="mono">${p.pts} pts \u00b7 ${p.picks||0} pick${(p.picks||0)===1?'':'s'} \u00b7 ${p.strikes||0} strike${(p.strikes||0)===1?'':'s'}${p.fouls ? ` \u00b7 ${p.fouls} foul${p.fouls===1?'':'s'}` : ''}</span></div>
+          ${histPicks(g, p)}`).join('')}
       </div>
-      <div class="line">${o.map((p,i) => `${i===0?'\u2605 ':''}${esc(p.name)} ${p.pts}`).join('   \u00b7   ')}</div>
     </div>`;
   }).join('');
+  $('hist-list').querySelectorAll('[data-hist]').forEach(el => el.onclick = () => {
+    const b = $('hist-body-' + el.dataset.hist);
+    const open = !b.classList.contains('hidden');
+    b.classList.toggle('hidden', open);
+    el.setAttribute('aria-expanded', String(!open));
+  });
+  $('hist-tap').textContent = h.length ? 'Tap any game for who picked what.' : '';
+}
+
+/* One drafter's picks and misses inside one game. Records written before picks
+   carried names have only `ranks`, and ones written before the miss list have no
+   `misses` at all, so both are reported as what they are rather than as an empty
+   game - the same rule the breakdowns follow. */
+function histPicks(g, p){
+  const rows = [];
+  const picked = p.picked || [];
+  if (picked.length)
+    rows.push(...picked.slice().sort((a,b) => a.r - b.r).map(pk =>
+      `<div class="gm-pick"><span class="r">${pk.r}</span>${esc(pk.n)}</div>`));
+  else if ((p.ranks || []).length)
+    rows.push(`<div class="gm-pick"><span class="r">\u2014</span>${p.ranks.length} pick${p.ranks.length===1?'':'s'}, recorded before names were kept</div>`);
+  else
+    rows.push('<div class="gm-pick"><span class="r">\u2014</span>nothing landed</div>');
+  const mine = (g.misses || []).filter(m => m.by === p.name);
+  rows.push(...mine.map(m =>
+    `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}</span></div>`));
+  if (!g.misses && (p.strikes || p.fouls))
+    rows.push('<div class="gm-pick miss"><span class="r">\u2014</span>misses were not recorded in this game</div>');
+  return rows.join('');
 }
 
 /* --------------------------------------------------------------- profile */

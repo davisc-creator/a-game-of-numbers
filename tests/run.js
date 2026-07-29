@@ -90,7 +90,7 @@ function loadApp(){
    teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
-   soloPriorBest, renderSeats,
+   soloPriorBest, renderSeats, renderRecords, histPicks,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -897,6 +897,56 @@ group('misspellings, mononyms and nicknames');
   ok(!/rank/i.test(html), 'and never says rank');
   const visible = html.replace(/<[^>]*>/g, ' ');
   ok(!/\d/.test(visible), 'no number reaches the screen — not the rank, not the stat');
+}
+
+group('past games open on the records screen');
+{
+  /* the game list looked tappable and did nothing: per-game detail existed only
+     inside one person's profile, which is also the one place that cannot show
+     everybody who played */
+  app.setRecords([
+    {ts: 100, range: '2000-2025', y0: 2000, y1: 2025, cat: 'bat_h', label: 'Hits', post: false,
+     misses: [{n: 'Dud', r: 400, k: 'strike', by: 'Carson'},
+              {n: 'Foulball', r: 105, k: 'foul', by: 'Bish'}],
+     players: [{name: 'Carson', pts: 60, picks: 2, strikes: 1, fouls: 0, ranks: [20, 40],
+                picked: [{n: 'Bravo', r: 40, i: 2}, {n: 'Alpha', r: 20, i: 1}], win: true},
+               {name: 'Bish', pts: 10, picks: 1, strikes: 1, fouls: 1, ranks: [10],
+                picked: [{n: 'Charlie', r: 10, i: 3}], win: false}]},
+  ]);
+  app.renderRecords();
+  const html = app.__els.get('hist-list').innerHTML;
+  ok(/data-hist="0"/.test(html), 'a past game is a button, not an inert div');
+  ok(/id="hist-body-0"/.test(html), 'with a body to open');
+  ok(/hist-body-0" class="hidden"|class="hist-body hidden"/.test(html), 'closed to begin with');
+  ok(html.indexOf('Carson') < html.indexOf('Bish'), 'drafters listed best first');
+  ok(/Alpha/.test(html) && /Bravo/.test(html) && /Charlie/.test(html),
+     'every drafter’s picks are shown, which a single profile cannot do');
+  ok(html.indexOf('Alpha') < html.indexOf('Bravo'), 'picks sorted by rank');
+  ok(/Dud/.test(html) && /Foulball/.test(html), 'and the misses too');
+  eq(app.__els.get('hist-tap').textContent, 'Tap any game for who picked what.',
+     'and the screen says the row opens');
+}
+{
+  /* the shapes actually sitting in people's records */
+  const modern = {misses: [{n: 'Dud', r: 400, k: 'strike', by: 'Carson'}]};
+  const p = {name: 'Carson', pts: 60, picks: 2, strikes: 1, fouls: 0, ranks: [20, 40],
+             picked: [{n: 'Alpha', r: 20}, {n: 'Bravo', r: 40}]};
+  ok(/Alpha/.test(app.histPicks(modern, p)), 'a modern record lists its picks by name');
+  ok(/Dud/.test(app.histPicks(modern, p)), 'and its misses');
+
+  /* records written before picks carried names — only `ranks` survived */
+  const old = {players: []};
+  const oldP = {name: 'Carson', pts: 60, picks: 2, strikes: 1, fouls: 0, ranks: [20, 40]};
+  const oldHtml = app.histPicks(old, oldP);
+  ok(/recorded before names were kept/.test(oldHtml),
+     'an older record says why it has no names rather than looking empty');
+  ok(/misses were not recorded/.test(oldHtml),
+     'and says the misses were never stored rather than implying there were none');
+
+  /* a genuinely empty game is a third thing again */
+  const none = app.histPicks({misses: []}, {name: 'Carson', pts: 0, picks: 0, strikes: 3, fouls: 0, ranks: [], picked: []});
+  ok(/nothing landed/.test(none), 'and a real blank still reads as a blank');
+  ok(!/recorded before/.test(none), 'without borrowing the older-record wording');
 }
 
 group('solo practice');
