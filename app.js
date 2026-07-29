@@ -582,8 +582,13 @@ function startGame(){
     rangeId: S.rangeId, post: S.post, cat: S.catId,
     label: pool.label, abbr: pool.abbr, pool,
     players: S.seats.map((n, i) => ({name: (n.trim() || `Drafter ${i+1}`),
-      pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: [], picked: []})),
+      pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: [], picked: [],
+      turns: 0, firstOk: 0, seq: ''})),
     round: 0, pos: 0, maxRounds: S.rounds, log: [], misses: [], saved: false,
+    /* attempts inside the current turn. A re-prompt - already taken, already
+       missed, ambiguous, empty - does not end the turn, so it must not count
+       against a first guess either. */
+    tries: 0,
   };
   show('game');
   $('g-era').textContent = S.data.label + (S.post ? ' \u00b7 Postseason' : '');
@@ -610,6 +615,7 @@ function advance(){
     if (S.G.maxRounds && S.G.round >= S.G.maxRounds) return finish();
     if (++guard > 400) return finish();
   } while (S.G.players[seat()].out);
+  S.G.tries = 0;
   renderGame(); focusGuess();
 }
 
@@ -618,6 +624,7 @@ function submitGuess(){
   const r = resolve(raw);
   clearConfirm();
   if (r.k === 'empty'){ setMsg('Type a name first.', 'warn'); return; }
+  if (r.k === 'taken' || r.k === 'missed' || r.k === 'ambiguous') S.G.tries++;
   if (r.k === 'taken'){
     setMsg(`${r.e.name} is already off the board. Pick again \u2014 no strike.`, 'warn');
     box.value = ''; focusGuess(); return;
@@ -684,6 +691,7 @@ function askConfirm(e, raw){
 function score(e){
   const p = S.G.players[seat()];
   e.drafted = true; e.by = p.name;
+  p.turns++; if (!S.G.tries) p.firstOk++; p.seq += 'p';
   p.pts += e.rank; p.picks++; p.ranks.push(e.rank);
   p.picked.push({n: e.name, r: e.rank, i: e.id});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val, id: e.id});
@@ -698,6 +706,7 @@ function score(e){
 function foul(f){
   const p = S.G.players[seat()];
   f.used = true; f.missed = true; p.fouls++;
+  p.turns++; p.seq += 'f';
   S.G.misses.push({kind: 'foul', name: f.name, rank: f.rank, val: f.val, by: p.name});
   const free = p.strikes >= 2;
   if (!free) p.strikes++;
@@ -715,6 +724,7 @@ function foul(f){
 function strike(raw, e){
   const p = S.G.players[seat()];
   p.strikes++;
+  p.turns++; p.seq += 's';
   if (e) e.missed = true;
   S.G.misses.push({kind: 'strike', name: e ? e.name : (raw || '').trim().slice(0, 28),
                    rank: e ? e.rank : null, val: e ? e.val : null,
@@ -746,6 +756,7 @@ function finish(){
       misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by})),
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
+        turns: p.turns, firstOk: p.firstOk, seq: p.seq,
         win: p.pts === best}))};
     /* the series fields ride along on an otherwise ordinary game record, so
        nothing that reads records has to know series exist */
@@ -1071,15 +1082,64 @@ function saveRecords(){
   try { localStorage.setItem(REC_KEY, JSON.stringify(RECORDS.slice(-400))); }
   catch (e) { setMsg('Records could not be saved \u2014 storage is full or blocked.', 'warn'); }
 }
+/* How rarely anyone else names a player. Rarity is measured against the other
+   people in the records, not against the whole population of picks: "nobody
+   else goes there" is the thing worth rewarding, and it is the question that
+   was actually asked. With one drafter there is no answer, so it stays null. */
+function rarityIndex(){
+  const byPlayer = new Map();      // pick key -> set of people who named him
+  const people = new Set();
+  for (const g of RECORDS)
+    for (const p of (g.players || [])){
+      const who = (p.name || '').trim().toLowerCase();
+      if (!who) continue;
+      people.add(who);
+      for (const pk of (p.picked || [])){
+        const k = pk.i != null ? 'i' + pk.i : 'n' + norm(pk.n || '');
+        if (!byPlayer.has(k)) byPlayer.set(k, new Set());
+        byPlayer.get(k).add(who);
+      }
+    }
+  return {
+    people,
+    /* share of the *other* drafters who have never named him */
+    of(key, me){
+      const others = people.size - (people.has(me) ? 1 : 0);
+      if (others <= 0) return null;
+      const knew = [...(byPlayer.get(key) || [])].filter(w => w !== me).length;
+      return 1 - knew / others;
+    },
+    key: pk => (pk.i != null ? 'i' + pk.i : 'n' + norm(pk.n || '')),
+  };
+}
+
+/* Longest run of successful picks inside a single game. Streaks do not carry
+   across games - a new board is a new problem. */
+function bestStreak(seq){
+  let best = 0, run = 0;
+  for (const c of String(seq || '')){
+    if (c === 'p'){ run++; if (run > best) best = run; } else run = 0;
+  }
+  return best;
+}
+
 function careerStats(){
+  const RX = rarityIndex();
   const m = new Map();
   for (const g of RECORDS) for (const p of (g.players || [])){
     const k = (p.name || '').trim().toLowerCase();
     if (!k) continue;
     let r = m.get(k);
-    if (!r){ r = {name: p.name.trim(), games:0, wins:0, pts:0, picks:0, strikes:0, fouls:0, ranks:[], best:0}; m.set(k, r); }
+    if (!r){ r = {name: p.name.trim(), games:0, wins:0, pts:0, picks:0, strikes:0, fouls:0,
+                  ranks:[], best:0, turns:0, firstOk:0, streak:0, rare:0, rareN:0}; m.set(k, r); }
     r.games++; if (p.win) r.wins++;
     r.pts += p.pts||0; r.picks += p.picks||0; r.strikes += p.strikes||0; r.fouls += p.fouls||0;
+    r.turns += p.turns||0; r.firstOk += p.firstOk||0;
+    r.streak = Math.max(r.streak, bestStreak(p.seq));
+    for (const pk of (p.picked || [])){
+      const v = RX.of(RX.key(pk), k);
+      if (v != null){ r.rare += (pk.r || 0) * v; r.rareN++; }
+    }
     r.ranks.push(...(p.ranks || []));
     if ((p.pts||0) > r.best) r.best = p.pts||0;
   }
@@ -1087,6 +1147,8 @@ function careerStats(){
     ppg: r.games ? r.pts / r.games : 0,
     hit: (r.picks + r.strikes) ? r.picks / (r.picks + r.strikes) : 0,
     ppp: r.picks ? r.pts / r.picks : 0,
+    first: r.turns ? r.firstOk / r.turns : 0,
+    rarePts: r.rare, streak: r.streak,
     depth: r.ranks.length ? r.ranks.reduce((a,b) => a+b, 0) / r.ranks.length : 0,
     deepest: r.ranks.length ? Math.max(...r.ranks) : 0,
   }));
@@ -1097,6 +1159,9 @@ const SORTERS = {
   hit:  (a,b) => b.hit - a.hit || b.ppg - a.ppg,
   depth:(a,b) => b.depth - a.depth || b.ppg - a.ppg,
   best: (a,b) => b.best - a.best || b.ppg - a.ppg,
+  rare: (a,b) => b.rarePts - a.rarePts || b.ppg - a.ppg,
+  first:(a,b) => b.first - a.first || b.ppg - a.ppg,
+  streak:(a,b) => b.streak - a.streak || b.ppg - a.ppg,
   wins: (a,b) => b.wins - a.wins || b.ppg - a.ppg,
   pts:  (a,b) => b.pts - a.pts,
 };
@@ -1175,15 +1240,21 @@ const DEPTH_BUCKETS = [[1,10,'1\u201310'], [11,25,'11\u201325'], [26,50,'26\u201
 
 function profileFor(name){
   const key = name.trim().toLowerCase();
+  const RX = rarityIndex();
   const mine = RECORDS.filter(g => (g.players||[]).some(p => (p.name||'').trim().toLowerCase() === key));
   const P = {name, games: mine.length, wins: 0, pts: 0, picks: 0, strikes: 0, fouls: 0,
              ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map(),
-             years: new Map(), clubs: new Map(), log: []};
+             years: new Map(), clubs: new Map(), log: [], h2hYears: new Map(),
+             turns: 0, firstOk: 0, streak: 0, rarePts: 0, rareList: [],
+             rareN: 0, rareSum: 0};
   for (const g of mine){
     const me = g.players.find(p => (p.name||'').trim().toLowerCase() === key);
     const ranks = (me.picked && me.picked.length) ? me.picked.map(x => x.r) : (me.ranks || []);
+    const span = recYears(g);          // needed by both the h2h and season splits
     if (me.win) P.wins++;
     P.pts += me.pts||0; P.picks += me.picks||0; P.strikes += me.strikes||0; P.fouls += me.fouls||0;
+    P.turns += me.turns||0; P.firstOk += me.firstOk||0;
+    P.streak = Math.max(P.streak, bestStreak(me.seq));
     P.ranks.push(...ranks);
 
     const bump = (map, k, label) => {
@@ -1192,8 +1263,13 @@ function profileFor(name){
       e.games++; e.ranks.push(...ranks); e.picks += me.picks||0; e.strikes += me.strikes||0;
       return e;
     };
-    bump(P.cats, g.cat, (g.label || g.cat) + (g.post ? ' (post)' : '')).pts += me.pts || 0;
-    bump(P.eras, g.range || '?', g.range || 'Unknown').pts += me.pts || 0;
+    const bc = bump(P.cats, g.cat, (g.label || g.cat) + (g.post ? ' (post)' : ''));
+    const be = bump(P.eras, g.range || '?', g.range || 'Unknown');
+    for (const e of [bc, be]){
+      e.pts += me.pts || 0;
+      e.turns = (e.turns || 0) + (me.turns || 0);
+      e.firstOk = (e.firstOk || 0) + (me.firstOk || 0);
+    }
 
     for (const o of g.players){
       const ok = (o.name||'').trim().toLowerCase();
@@ -1203,15 +1279,42 @@ function profileFor(name){
       h.games++;
       if (me.pts > o.pts) h.ahead++; else if (me.pts < o.pts) h.behind++; else h.tied++;
       h.margin += (me.pts||0) - (o.pts||0);
+      /* the same season split, run for both of them over the games they shared,
+         so the chart shows where two people's knowledge actually diverges */
+      if (PX.played){
+        let yy = P.h2hYears.get(ok);
+        if (!yy){ yy = new Map(); P.h2hYears.set(ok, yy); }
+        const add = (side, picks) => {
+          for (const pk of (picks || [])){
+            if (pk.i == null) continue;
+            const all = PX.played.y[pk.i] || [];
+            const inside = span ? all.filter(y => y >= span[0] && y <= span[1]) : all;
+            const ys = inside.length ? inside : all;
+            if (!ys.length) continue;
+            const share = pk.r / ys.length;
+            for (const y of ys){
+              const row = yy.get(y) || [0, 0];
+              row[side] += share; yy.set(y, row);
+            }
+          }
+        };
+        add(0, me.picked); add(1, o.picked);
+      }
     }
-    for (const pk of (me.picked || []))
+    for (const pk of (me.picked || [])){
       P.sig.set(pk.n, (P.sig.get(pk.n) || 0) + 1);
+      const v = RX.of(RX.key(pk), key);
+      if (v != null){
+        P.rarePts += (pk.r || 0) * v;
+        P.rareSum += v; P.rareN++;
+        P.rareList.push({name: pk.n, rank: pk.r, rare: v});
+      }
+    }
 
     /* Spread each pick across the seasons he played inside this era, and across
        his clubs weighted by how long he was at each. Splitting rather than
        counting him whole in every bucket keeps the totals reconciling with the
        points actually scored. */
-    const span = recYears(g);
     if (PX.played){
       for (const pk of (me.picked || [])){
         if (pk.i == null) continue;
@@ -1248,19 +1351,51 @@ function profileFor(name){
      average rank does not - a shallow list caps how deep anyone can go. Set
      before shape() copies these, or the copies come out without it. */
   for (const m of [P.cats, P.eras])
-    for (const e of m.values()) e.ppg = e.games ? e.pts / e.games : 0;
+    for (const e of m.values()){
+      e.ppg = e.games ? e.pts / e.games : 0;
+      e.first = e.turns ? e.firstOk / e.turns : null;
+    }
   const shape = m => [...m.values()].map(e => ({...e, depth: avg(e.ranks),
     hit: (e.picks+e.strikes) ? e.picks/(e.picks+e.strikes) : 0}))
     .filter(e => e.ranks.length).sort((a,b) => b.depth - a.depth);
   P.catList = shape(P.cats);
   P.eraList = shape(P.eras);
   P.h2hList = [...P.h2h.values()].sort((a,b) => b.games - a.games);
+  for (const h of P.h2hList){
+    const yy = P.h2hYears.get((h.name || '').trim().toLowerCase());
+    h.years = yy ? [...yy.entries()].sort((a, b) => a[0] - b[0]) : [];
+  }
   P.yearList = [...P.years.entries()].sort((a, b) => a[0] - b[0]);
   P.clubList = [...P.clubs.entries()].sort((a, b) => b[1] - a[1]);
   P.log.sort((a, b) => b.ts - a.ts);
+  P.first = P.turns ? P.firstOk / P.turns : 0;
+  P.rareAvg = P.rareN ? P.rareSum / P.rareN : null;
+  P.rareList.sort((a, b) => b.rare - a.rare || b.rank - a.rank);
   P.best = P.log.reduce((m, g) => Math.max(m, g.pts), 0);
   P.sigList = [...P.sig.entries()].filter(([,n]) => n > 1).sort((a,b) => b[1] - a[1]).slice(0, 10);
   return P;
+}
+
+/* Two people's season points, back to back. Bars grow from a shared centre so
+   the years one of them owns are obvious at a glance. */
+function diverge(h){
+  if (!h.years || !h.years.length)
+    return '<p class="hint">No season data for the games you shared.</p>';
+  const wide = h.years.length > 25;
+  const rows = wide
+    ? [...h.years.reduce((m, [y, v]) => {
+        const d = Math.floor(y / 10) * 10, r = m.get(d) || [0, 0];
+        r[0] += v[0]; r[1] += v[1]; return m.set(d, r);
+      }, new Map())].sort((a, b) => a[0] - b[0]).map(([d, v]) => [d + 's', v])
+    : h.years;
+  const max = Math.max(1, ...rows.map(([, v]) => Math.max(v[0], v[1])));
+  return `<div class="dv">${rows.map(([lab, v]) => `
+    <div class="dv-row">
+      <div class="dv-l"><div class="dv-bar mine" style="width:${v[0] / max * 100}%"></div></div>
+      <div class="dv-lab">${esc(String(lab))}</div>
+      <div class="dv-r"><div class="dv-bar theirs" style="width:${v[1] / max * 100}%"></div></div>
+    </div>`).join('')}</div>
+    <p class="hint">Left is you, right is ${esc(h.name)}, across the ${h.games} game${h.games === 1 ? '' : 's'} you shared.</p>`;
 }
 
 function renderProfile(name){
@@ -1269,7 +1404,9 @@ function renderProfile(name){
   $('prof-name').textContent = P.name;
   $('prof-top').innerHTML = [
     [P.games, 'games'], [P.wins, 'wins'], [P.ppg.toFixed(1), 'pts/game'],
-    [Math.round(P.hit*100) + '%', 'hit rate'], [P.depth ? P.depth.toFixed(0) : '\u2014', 'avg depth'],
+    [Math.round(P.hit*100) + '%', 'hit rate'],
+    [P.turns ? Math.round(P.first*100) + '%' : '\u2014', 'first guess'],
+    [P.streak || '\u2014', 'best streak'],
   ].map(([v,l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('');
 
   const counts = DEPTH_BUCKETS.map(([lo,hi]) => P.ranks.filter(r => r >= lo && r <= hi).length);
@@ -1299,9 +1436,28 @@ function renderProfile(name){
     .sort((a, b) => (b.ppg || 0) - (a.ppg || 0)).map(e => `
     <div class="brk">
       <div class="t">${esc(e.label)}</div>
-      <div class="s">${e.games} game${e.games===1?'':'s'} \u00b7 depth ${e.depth.toFixed(0)}</div>
+      <div class="s">${e.games} game${e.games===1?'':'s'} \u00b7 depth ${e.depth.toFixed(0)}${
+        e.first == null ? '' : ` \u00b7 first guess ${Math.round(e.first*100)}%`}</div>
       <div class="v">${(e.ppg || 0).toFixed(0)}</div>
     </div>`).join('') : '<p class="hint">Nothing yet.</p>';
+  $('prof-eras-note').textContent = P.eraList.length
+    ? 'Graded on points per game, not average rank \u2014 a shallow list caps how deep anyone can go. First guess is how often the opening attempt of a turn landed.'
+    : '';
+
+  /* ---- deep cuts: what he knows that nobody else does ---- */
+  const rare = P.rareList.filter(r => r.rare > 0).slice(0, 12);
+  $('prof-rare').innerHTML = rare.length
+    ? rare.map(r => `
+      <div class="brk">
+        <div class="t">${esc(r.name)}</div>
+        <div class="s">rank ${r.rank} \u00b7 ${Math.round(r.rare*100)}% of the others never named him</div>
+        <div class="v">${Math.round(r.rank * r.rare)}</div>
+      </div>`).join('')
+    : `<p class="hint">${P.rareAvg == null
+        ? 'Rarity needs somebody to compare against \u2014 play a game with another drafter.'
+        : 'Every pick so far is one the others have made too.'}</p>`;
+  $('prof-rare-note').textContent = P.rareAvg == null ? ''
+    : `Rarity points ${Math.round(P.rarePts)} of ${Math.round(P.pts)}. A pick counts for its rank times the share of the other drafters who have never named that player, so obvious picks are worth little here and nobody is rewarded for their own repeats.`;
 
   /* ---- seasons ---- */
   const bar = (rows, fmt) => {
@@ -1369,11 +1525,20 @@ function renderProfile(name){
     ? `Best game: ${P.best}. Tap any line for the picks and the misses.` : '';
 
   $('prof-h2h').innerHTML = P.h2hList.length ? P.h2hList.map(h => `
-    <div class="brk">
-      <div class="t">vs ${esc(h.name)}</div>
-      <div class="s">${h.games} together</div>
-      <div class="v">${h.ahead}\u2013${h.behind}${h.tied?'\u2013'+h.tied:''}</div>
+    <div class="h2h-row">
+      <button class="brk h2h-head" data-h2h="${esc(h.name)}" aria-expanded="false">
+        <div class="t">vs ${esc(h.name)}</div>
+        <div class="s">${h.games} together${h.years && h.years.length ? ' \u00b7 tap for the season split' : ''}</div>
+        <div class="v">${h.ahead}\u2013${h.behind}${h.tied?'\u2013'+h.tied:''}</div>
+      </button>
+      <div class="h2h-body hidden">${diverge(h)}</div>
     </div>`).join('') : '<p class="hint">No shared games yet.</p>';
+  $('prof-h2h').querySelectorAll('[data-h2h]').forEach(el => el.onclick = () => {
+    const b = el.parentElement.querySelector('.h2h-body');
+    const open = !b.classList.contains('hidden');
+    b.classList.toggle('hidden', open);
+    el.setAttribute('aria-expanded', String(!open));
+  });
   $('prof-h2h-note').textContent = P.h2hList.length
     ? 'Wins\u2013losses head to head, counting who finished higher in each shared game.'
     : '';

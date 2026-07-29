@@ -235,3 +235,17 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
   border:1px solid var(--rule);padding:0 5px;margin-left:6px}
 .rec-stats.six{grid-template-columns:repeat(6,1fr)}
 @media (max-width:520px){.rec-stats.six{grid-template-columns:repeat(3,1fr)}}
+
+/* head-to-head season divergence */
+.h2h-row{border-bottom:1px solid rgba(61,99,83,.45)}
+.h2h-head{display:grid;grid-template-columns:1fr auto auto;gap:10px;width:100%;
+  background:transparent;border:0;color:var(--chalk);cursor:pointer;text-align:left;
+  font-family:'Barlow Condensed',sans-serif;padding:8px 2px;align-items:baseline}
+.h2h-head:hover{color:var(--pole)}
+.h2h-body{padding:4px 2px 12px}
+.dv-row{display:grid;grid-template-columns:1fr 62px 1fr;align-items:center;gap:6px;margin:2px 0}
+.dv-l{display:flex;justify-content:flex-end}
+.dv-lab{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--chalk-dim);text-align:center}
+.dv-bar{height:11px;border-radius:1px}
+.dv-bar.mine{background:var(--pole)}
+.dv-bar.theirs{background:var(--rule)}

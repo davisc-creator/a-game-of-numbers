@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+lah/
+lahman.tar.gz
+"* 2.json"

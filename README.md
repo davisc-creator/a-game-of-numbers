@@ -52,7 +52,10 @@ under the second.
 ## Records
 
 Career stats per person, graded on points per game, points per pick, hit rate,
-average depth, best game, wins or total points. Tap anyone for a breakdown: the
+average depth, best game, wins, total points, **rarity**, **first-guess
+accuracy** or **longest streak**. Rarity weights each pick by the share of the
+other drafters who have never named that player, so obvious picks are worth
+little and deep cuts are worth a lot. Tap anyone for a breakdown: the
 seasons they know, the clubs they know, per-category and per-era grading, head
 to head, a pick-depth histogram, and every game they have played with the picks
 and misses from each.

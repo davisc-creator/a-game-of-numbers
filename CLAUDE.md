@@ -24,21 +24,14 @@ Live at `https://davisc-creator.github.io/a-game-of-numbers/`, deployed from
 `main` at `~/Projects/a-game-of-numbers` via GitHub Pages (branch `main`, root,
 `.nojekyll` committed because Jekyll must not process 250+ data files).
 
-**Two working copies exist** — `~/Desktop/app` is where edits happen and
-`~/Projects/a-game-of-numbers` is the git repo. Verify which tree you are in
-before running any git command:
+**There is one copy: `~/Projects/a-game-of-numbers`.** Work there.
 
-```bash
-pwd && ls index.html shell.js app.js game1620.js data/manifest.json
-```
-
-Consolidating to one folder is still open, and there is now a strong reason to:
-**`~/Desktop` is iCloud-synced.** Rewriting `data/` in bulk repeatedly left
-`"<name> 2.json"` conflict copies behind — 106 once, then 82 more that appeared
-spontaneously later. The test suite catches them as a file-count failure, which
-is the only reason they were noticed. After any bulk regeneration run
-`find data data-teams -name "* 2.json" -delete` and check the count. The repo
-copy in `~/Projects` is not affected.
+It used to be two — a working copy on the Desktop and the repo here — and the
+Desktop one was iCloud-synced, which left `"<name> 2.json"` conflict copies
+behind every time `data/` was rewritten in bulk: 106, then 82, then 251. The
+file-count assertion in the suite was the only thing that ever caught them.
+Consolidated 2026-07-28; the old folder went to `~/.Trash/app-consolidated-2026-07-28`
+rather than being deleted. Do not put a working copy back under `~/Desktop`.
 
 **Do not run `gh auth login`, enter GitHub credentials, or create a personal
 access token.** Authentication is the owner's to perform. The SSH key at
@@ -465,3 +458,37 @@ Two edges worth keeping:
 Records also carry `y0`/`y1` now. Records written before that fall back to
 parsing the range id, which works for every shape the game has produced —
 `1998`, `1970-1979`, `SFG_1994-2025`.
+
+
+---
+
+## The four derived stats
+
+All four live in `profileFor` and `careerStats`, and both have to carry them —
+the records list sorts on `careerStats`, and an early version accumulated them
+only in the profile, so the list was quietly sorting on `undefined`. The suite
+now asserts every row is finite and every comparator returns a number.
+
+**Rarity.** A pick counts for its rank times the share of *the other drafters*
+who have never named that player. Measuring against other people rather than
+against all picks is what the question actually asked, and it stops anyone being
+rewarded for their own repeats. With one drafter there is nobody to compare
+against, so it returns `null` and the screen says so rather than showing a zero
+that looks like a score.
+
+**First guess.** `S.G.tries` counts attempts inside a turn. A re-prompt — already
+taken, already missed, ambiguous, empty — costs an attempt but does not end the
+turn, so it must not count against a first guess either. A turn-ending outcome
+records whether it was the opening attempt. Shown per era, because knowing an
+era is partly knowing it instantly.
+
+**Streaks** are the longest run of successful picks inside a *single* game, from
+a per-player `seq` string of `p`/`f`/`s`. They deliberately do not carry across
+games: a new board is a new problem.
+
+**Head-to-head season chart** runs the same season split for both people over the
+games they shared and draws them back to back from a shared centre. It answers
+where two people's knowledge diverges, which the win-loss line cannot.
+
+Records written before any of this lack `turns`, `firstOk` and `seq`; every
+consumer treats a missing value as zero or `null` rather than assuming.

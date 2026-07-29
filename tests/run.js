@@ -88,7 +88,7 @@ function loadApp(){
    startSeries, seriesTake, seriesTarget, seriesLabel, seriesStanding, SMODES,
    renderSeries, renderSeriesHistory, buildTeamRange, buildTeamMembers,
    teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
-   renderProfile, SORTERS,
+   renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -600,6 +600,100 @@ group('breakdowns');
   eq(app.recYears({range: '1998'}), [1998, 1998], 'a single season too');
   eq(app.recYears({y0: 2000, y1: 2025, range: 'whatever'}), [2000, 2025], 'explicit years win');
   eq(app.recYears({range: 'SFG_1994-2025'}), [1994, 2025], 'and a team board id parses');
+}
+
+group('rarity, first guess, streaks and divergence');
+{
+  eq(app.bestStreak('ppspppf'), 3, 'longest run of picks inside a game');
+  eq(app.bestStreak('sss'), 0, 'no picks, no streak');
+  eq(app.bestStreak(''), 0, 'nothing at all');
+  eq(app.bestStreak('pppp'), 4, 'a clean sweep');
+  eq(app.bestStreak(undefined), 0, 'an older record with no sequence');
+
+  const G = (ts, rows) => ({ts, range: '2000-2025', y0: 2000, y1: 2025, cat: 'bat_h',
+    label: 'Hits', post: false, players: rows});
+  const pl = (name, pts, picks, strikes, picked, turns, firstOk, seq, win) =>
+    ({name, pts, picks, strikes, fouls: 0, ranks: picked.map(p => p.r), picked,
+      turns, firstOk, seq, win});
+
+  app.setRecords([
+    G(1, [pl('Carson', 30, 2, 1, [{n: 'Common', r: 10, i: 1}, {n: 'Deep', r: 20, i: 2}], 3, 2, 'pps', true),
+          pl('Sam',    10, 1, 2, [{n: 'Common', r: 10, i: 1}], 3, 0, 'spp'.slice(0,1) + 'ss', false)]),
+    G(2, [pl('Carson', 20, 1, 0, [{n: 'Common', r: 20, i: 1}], 1, 1, 'p', true),
+          pl('Sam',    15, 1, 1, [{n: 'Alsodeep', r: 15, i: 3}], 2, 1, 'ps', false)]),
+  ]);
+  app.PX.played = {y: {1: [2001], 2: [2010, 2011], 3: [2020]}, f: {}};
+
+  const RX = app.rarityIndex();
+  eq(RX.people.size, 2, 'two drafters on record');
+  eq(RX.of('i1', 'carson'), 0, 'a player the other one also names is worth no rarity');
+  eq(RX.of('i2', 'carson'), 1, 'a player nobody else has named is fully rare');
+  eq(RX.of('i3', 'carson'), 0, 'and one only they have named is not yours to claim');
+  /* rarity is always "how rare would this be for the person who named him" —
+     Deep is rare to Carson because Sam never found him, and not rare to Sam
+     because Carson did */
+  eq(RX.of('i2', 'sam'), 0, 'the same player is not rare to somebody the other one already knows');
+  eq(RX.of('i9', 'carson'), 1, 'an unseen player is rare by definition');
+
+  const C = app.profileFor('Carson');
+  eq(C.rarePts, 20, 'rarity points are rank times the share of others who missed him');
+  ok(C.rareList.length === 3, 'every pick is scored for rarity');
+  eq(C.rareList[0].name, 'Deep', 'the rarest is listed first');
+  eq(C.rarePts <= C.pts, true, 'and rarity can never exceed the points actually scored');
+
+  eq(C.turns, 4, 'turns counted');
+  eq(C.firstOk, 3, 'first-attempt hits counted');
+  eq(Math.round(C.first * 100), 75, 'first-guess accuracy');
+  eq(C.streak, 2, 'best streak inside a single game');
+
+  const eras = C.eraList.filter(e => e.label === '2000-2025');
+  eq(eras.length, 1, 'one era played');
+  eq(Math.round(eras[0].first * 100), 75, 'first-guess accuracy per era');
+  eq(eras[0].ppg, 25, 'and era grading stays points per game');
+
+  /* streaks must not run across games: two games of 'p' each is a streak of 1 */
+  app.setRecords([G(1, [pl('Solo', 10, 1, 0, [{n: 'A', r: 10, i: 1}], 1, 1, 'p', true)]),
+                  G(2, [pl('Solo', 10, 1, 0, [{n: 'B', r: 10, i: 2}], 1, 1, 'p', true)])]);
+  eq(app.profileFor('Solo').streak, 1, 'a streak does not carry across games');
+  eq(app.profileFor('Solo').rareAvg, null, 'rarity needs somebody to compare against');
+  eq(app.profileFor('Solo').rarePts, 0, 'and scores nothing on your own');
+
+  /* careerStats has to carry the same four, or the records list sorts on
+     undefined - which is exactly what it was doing */
+  app.setRecords([
+    G(1, [pl('Carson', 30, 2, 1, [{n: 'Common', r: 10, i: 1}, {n: 'Deep', r: 20, i: 2}], 3, 2, 'pps', true),
+          pl('Sam',    10, 1, 2, [{n: 'Common', r: 10, i: 1}], 3, 0, 'sss', false)]),
+  ]);
+  const cs = app.careerStats();
+  const car = cs.find(r => r.name === 'Carson');
+  ok(Number.isFinite(car.rarePts), 'career rarity is a number, not NaN');
+  eq(car.rarePts, 20, 'and matches the profile');
+  eq(car.turns, 3, 'career turns');
+  eq(Math.round(car.first * 100), 67, 'career first-guess accuracy');
+  eq(car.streak, 2, 'career best streak');
+  ok(cs.every(r => Number.isFinite(r.rarePts) && Number.isFinite(r.streak)
+                && Number.isFinite(r.first)), 'every row is sortable on the new columns');
+  for (const k of ['rare', 'first', 'streak'])
+    ok(Number.isFinite(app.SORTERS[k](cs[0], cs[1] || cs[0])), `SORTERS.${k} compares cleanly`);
+}
+{
+  /* the divergence chart */
+  const mk = (ts, cPicked, sPicked) => ({ts, range: '2000-2025', y0: 2000, y1: 2025,
+    cat: 'bat_h', label: 'Hits', post: false, players: [
+      {name: 'Carson', pts: 10, picks: 1, strikes: 0, fouls: 0, ranks: [10], picked: cPicked, win: true},
+      {name: 'Sam', pts: 10, picks: 1, strikes: 0, fouls: 0, ranks: [10], picked: sPicked, win: false}]});
+  app.setRecords([mk(1, [{n: 'Old', r: 40, i: 1}], [{n: 'New', r: 30, i: 3}])]);
+  app.PX.played = {y: {1: [2001], 3: [2020]}, f: {}};
+  const P = app.profileFor('Carson');
+  eq(P.h2hList.length, 1, 'one opponent');
+  const yrs = Object.fromEntries(P.h2hList[0].years);
+  eq(yrs[2001], [40, 0], 'a season only you scored in shows on your side alone');
+  eq(yrs[2020], [0, 30], 'and theirs on theirs');
+  const html = app.diverge(P.h2hList[0]);
+  ok(/dv-bar mine/.test(html) && /dv-bar theirs/.test(html), 'the chart draws both sides');
+  ok(/2001/.test(html) && /2020/.test(html), 'labelled by season');
+  ok(/No season data/.test(app.diverge({years: [], games: 1, name: 'X'})),
+     'and says so when there is nothing to draw');
 }
 
 group('records and profile');

@@ -161,6 +161,9 @@
         <button class="pill" data-sort="depth">Avg depth</button>
         <button class="pill" data-sort="best">Best game</button>
         <button class="pill" data-sort="wins">Wins</button>
+        <button class="pill" data-sort="rare">Rarity</button>
+        <button class="pill" data-sort="first">First guess</button>
+        <button class="pill" data-sort="streak">Streak</button>
         <button class="pill" data-sort="pts">Total points</button>
       </div>
       <div id="rec-list"></div>
@@ -205,6 +208,11 @@
       <p class="hint">Where his correct picks landed on the board. Rightward is harder knowledge.</p>
     </div>
     <div class="card">
+      <h2>Deep cuts</h2>
+      <div id="prof-rare"></div>
+      <p class="hint" id="prof-rare-note"></p>
+    </div>
+    <div class="card">
       <h2>Seasons you know</h2>
       <div id="prof-years"></div>
       <p class="hint" id="prof-years-note"></p>
@@ -227,6 +235,7 @@
     <div class="card">
       <h2>By era</h2>
       <div id="prof-eras"></div>
+      <p class="hint" id="prof-eras-note"></p>
     </div>
     <div class="card">
       <h2>Head to head</h2>
