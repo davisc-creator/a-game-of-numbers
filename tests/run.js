@@ -87,7 +87,8 @@ function loadApp(){
    careerStats, profileFor, DEPTH_BUCKETS, S, buildCustom, rnd, depthOf, CX,
    startSeries, seriesTake, seriesTarget, seriesLabel, seriesStanding, SMODES,
    renderSeries, renderSeriesHistory, buildTeamRange, buildTeamMembers,
-   teamMembers, teamsInRange, loadTeamIndex, TX,
+   teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
+   renderProfile, SORTERS,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -104,7 +105,7 @@ const AZ = 'abcdefghijklmnopqrstuvwxyz';
 const alpha = n => AZ[Math.floor(n / 26) % 26].toUpperCase() + AZ[n % 26];
 const fill = (n, from) => Array.from({length: n}, (_, i) => [`Filler ${alpha(from - i)}`, from - i, 0]);
 
-const FIX = () => ({
+const FIX = () => withIds({
   id: 'test', label: 'Test Era', y0: 2000, y1: 2001, post: false,
   sides: {
     /* 130 deep, so the 1-100 / 101-110 / 111+ boundaries are all exercised.
@@ -153,6 +154,18 @@ const FIX = () => ({
     blind_h: {side: 'dupblind', col: 'H', label: 'Blind',   abbr: 'H',    depth: 3, dir: 'desc'},
   },
 });
+
+/* every shipped side carries `ids`; the fixture has to as well, or the pool
+   entries come back with a null player id and the breakdowns have nothing to
+   attribute to */
+function withIds(f){
+  let base = 0;
+  for (const s of Object.values(f.sides)){
+    s.ids = s.rows.map((_, i) => base + i);
+    base += s.rows.length;
+  }
+  return f;
+}
 
 function poolFor(app, catId){
   app.S.data = FIX();
@@ -323,7 +336,8 @@ group('scoring and strikes');
   eq(G.players[0].pts, 3, 'a pick scores its rank');
   eq(G.players[0].picks, 1, 'pick counted');
   eq(G.players[0].ranks, [3], 'rank recorded');
-  eq(G.players[0].picked, [{n: 'Hank Aaron', r: 3}], 'pick recorded with name');
+  eq(G.players[0].picked.map(p => [p.n, p.r]), [['Hank Aaron', 3]], 'pick recorded with name');
+  ok(G.players[0].picked[0].i != null, 'and with the player id, for the year and club breakdowns');
   ok(G.pool.board.find(e => e.name === 'Hank Aaron').drafted, 'drafted player leaves the pool');
 }
 {
@@ -482,6 +496,112 @@ group('series');
   ok(!/Runs/.test(html), 'the loose game is not shown as a series');
 }
 
+group('misses are out of play');
+{
+  const G = gameOn(app, 'bat_h', ['A', 'B']);
+  const foulMan = G.pool.foul[0];
+  app.foul(foulMan); app.__drain();
+  ok(foulMan.missed, 'a fouled player is marked missed');
+  eq(G.misses.length, 1, 'and lands on the miss list');
+  eq(G.misses[0].kind, 'foul', 'tagged as a foul');
+
+  const before = G.players.map(p => p.strikes);
+  const again = app.resolve(foulMan.name);
+  eq(again.k, 'missed', 'naming him again is neither a foul nor a strike');
+  app.submitGuess();
+  eq(G.players.map(p => p.strikes), before, 'nobody is charged for it');
+
+  /* a struck-out player is burned the same way */
+  const deep = G.pool.byName.get(app.norm('Filler ' + 'Zz'.slice(0,0) + alpha(880)))
+            || G.pool.byName.get(('Filler ' + alpha(880)).toLowerCase());
+  const off = deep && deep[0];
+  ok(off && off.zone === 'off', 'found an off-board player to strike on');
+  app.strike('x', off); app.__drain();
+  ok(off.missed, 'a struck-out player is marked missed');
+  eq(app.resolve(off.name).k, 'missed', 'and naming him again costs nothing');
+  ok(G.misses.some(m => m.kind === 'strike'), 'strikes join the miss list');
+  ok(G.misses.some(m => m.name === off.name), 'by name, so the board can show them');
+
+  /* a strike on a name nobody recognises still counts against you */
+  const s0 = G.players[app.seat()].strikes;
+  app.strike('Zzzqqq', null); app.__drain();
+  ok(G.misses.some(m => m.real === false), 'an unrecognised name is logged as a miss too');
+}
+
+group('breakdowns');
+{
+  app.setRecords([
+    {ts: 10, range: '2000-2025', y0: 2000, y1: 2025, cat: 'bat_h', label: 'Hits', post: false,
+     players: [{name: 'Carson', pts: 60, picks: 2, strikes: 1, fouls: 0, ranks: [20, 40],
+                picked: [{n: 'A', r: 20, i: 1}, {n: 'B', r: 40, i: 2}], win: true},
+               {name: 'Sam', pts: 10, picks: 1, strikes: 2, fouls: 1, ranks: [10],
+                picked: [{n: 'C', r: 10, i: 3}], win: false}],
+     misses: [{n: 'Dud', r: 400, k: 'strike', by: 'Carson'}]},
+    {ts: 20, range: '1998', y0: 1998, y1: 1998, cat: 'bat_hr', label: 'Home Runs', post: false,
+     players: [{name: 'Carson', pts: 25, picks: 1, strikes: 0, fouls: 0, ranks: [25],
+                picked: [{n: 'D', r: 25, i: 4}], win: true}]},
+  ]);
+  /* a stand-in index: player 1 played four seasons for two clubs, 2 and 3 one each */
+  app.PX.played = {y: {1: [2000, 2001, 2002, 2003], 2: [2010], 3: [2020], 4: [1998]},
+                   f: {1: {NYY: 3, BOS: 1}, 2: {LAD: 1}, 3: {SFG: 1}, 4: {NYY: 1}}};
+  app.PX.clubs = {NYY: {name: 'New York Yankees'}, BOS: {name: 'Boston Red Sox'},
+                  LAD: {name: 'Los Angeles Dodgers'}, SFG: {name: 'San Francisco Giants'}};
+
+  const P = app.profileFor('Carson');
+  eq(P.games, 2, 'both games counted');
+  eq(P.pts, 85, 'points summed');
+
+  /* year split: pick worth 20 over 4 seasons = 5 each; pick worth 40 over 1 = 40 */
+  const yr = Object.fromEntries(P.yearList);
+  eq(yr[2000], 5, 'a pick is shared evenly across the seasons he played');
+  eq(yr[2001], 5, 'every one of them');
+  eq(yr[2010], 40, 'a single-season player takes the whole pick');
+  const yearTotal = P.yearList.reduce((a, [, v]) => a + v, 0);
+  ok(Math.abs(yearTotal - P.pts) < 1e-9,
+     `the season chart reconciles with total points (${yearTotal} vs ${P.pts})`);
+
+  eq(yr[1998], 25, 'a pick from another era lands in its own season');
+  const cl = Object.fromEntries(P.clubList);
+  ok(Math.abs(cl.NYY - (20 * 3 / 4 + 25)) < 1e-9, 'clubs split by seasons served, not evenly');
+  ok(Math.abs(cl.BOS - (20 / 4)) < 1e-9, 'the shorter stay gets the smaller share');
+  const clubTotal = P.clubList.reduce((a, [, v]) => a + v, 0);
+  ok(Math.abs(clubTotal - P.pts) < 1e-9, 'the club chart reconciles too');
+
+  /* per-game log */
+  eq(P.log.length, 2, 'a row per game');
+  eq(P.log[0].ts, 20, 'newest first');
+  eq(P.log[1].pts, 60, 'carrying that game\u2019s score');
+  eq(P.log[1].against.map(o => o.name), ['Sam'], 'and who it was against');
+  eq(P.log[1].picked.length, 2, 'and the picks');
+  eq(P.log[1].misses.length, 1, 'and the misses');
+  eq(P.best, 60, 'best single game');
+
+  /* eras graded on points per game */
+  const eras = Object.fromEntries(P.eraList.map(e => [e.label, e.ppg]));
+  eq(eras['2000-2025'], 60, 'era grading is points per game');
+  eq(eras['1998'], 25, 'for every era played');
+  eq(P.catList.every(c => typeof c.ppg === 'number'), true, 'categories carry it too');
+
+  /* a pick whose player has no season data must not vanish from the chart */
+  app.PX.played = {y: {1: [2000, 2001, 2002, 2003], 2: [2010], 3: [2020]}, f: {}};
+  const Q = app.profileFor('Carson');
+  const qTotal = Q.yearList.reduce((a, [, v]) => a + v, 0) + (Q.unplaced || 0);
+  ok(Math.abs(qTotal - Q.pts) < 1e-9, 'unknown players are counted as unplaced, not dropped');
+
+  ok(app.SORTERS.ppp && app.SORTERS.best && app.SORTERS.pts, 'new grading options exist');
+  const rows = app.careerStats();
+  const c = rows.find(r => r.name === 'Carson');
+  eq(c.ppp, 85 / 3, 'points per pick');
+  eq(c.best, 60, 'best game in career stats');
+}
+{
+  /* records written before y0/y1 existed still place their picks in time */
+  eq(app.recYears({range: '1970-1979'}), [1970, 1979], 'a range id yields its years');
+  eq(app.recYears({range: '1998'}), [1998, 1998], 'a single season too');
+  eq(app.recYears({y0: 2000, y1: 2025, range: 'whatever'}), [2000, 2025], 'explicit years win');
+  eq(app.recYears({range: 'SFG_1994-2025'}), [1994, 2025], 'and a team board id parses');
+}
+
 group('records and profile');
 {
   app.setRecords([
@@ -609,7 +729,7 @@ group('shipped data');
 
   /* the shared tables the custom-range aggregator reads are not ranges */
   const GLOBAL = new Set(['manifest.json', 'cats.json', 'players.json',
-                          'league.json', 'awards.json']);
+                          'league.json', 'awards.json', 'played.json']);
   GLOBAL.forEach(g => ok(fs.existsSync(path.join(DATA, g)), `${g} is shipped`));
   const files = fs.readdirSync(DATA).filter(f => f.endsWith('.json') && !GLOBAL.has(f));
 

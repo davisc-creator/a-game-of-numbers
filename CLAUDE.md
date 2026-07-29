@@ -136,6 +136,11 @@ value and rank, which needs every player, not just the ranked ones.
 - **A strike still reports the truth** — the player's actual value and rank, or
   that he had none in this era, or that he did not play in it.
 - Three strikes ends that person's drafting; everyone else continues.
+- **A missed player is out of play.** Once a name has been fouled or struck out
+  on, saying it again costs nothing and re-prompts — the same as naming someone
+  already drafted. The miss list sits under the draft list on the game screen,
+  because what has already been burned is half the information in the room.
+  This replaces the older rule that a used foul cost a strike the second time.
 - Already-drafted names and ambiguous last names cost nothing and re-prompt.
 - Near misses get one "did you mean?" confirmation before a strike lands.
 
@@ -429,3 +434,34 @@ Three things worth not undoing:
 
 Both modes re-rank and re-cut from scratch, because the pool shrank — a top 100
 of the Giants is not a slice of the top 100 of baseball.
+
+
+---
+
+## Breakdowns
+
+`data/played.json` holds, per player id, the seasons he appeared in and the
+clubs he appeared for with a season count each. `profileFor` uses it to answer
+two questions the old profile could not: which seasons somebody knows, and
+which clubs.
+
+**Everything splits, nothing double-counts.** A pick is shared evenly across the
+seasons that player was active *inside the era the game was played*, and across
+his clubs weighted by how long he was at each — Ruth's single Braves year is not
+half his career. The charts therefore reconcile with the points actually scored,
+and the test suite asserts that they do. Counting a player whole in every bucket
+would have been easier and would have produced a chart that silently disagrees
+with the score, which in a project this fussy reads as a bug.
+
+Two edges worth keeping:
+
+- **If none of a player's seasons land inside the era**, his points fall back to
+  his whole career rather than vanishing. If he has no season data at all they
+  go to `P.unplaced`, which the note on screen reports. Points never disappear.
+- **Eras and categories are graded on points per game, not average rank.** A
+  shallow list caps how deep anyone can go, so rank flatters the eras nobody
+  knows well.
+
+Records also carry `y0`/`y1` now. Records written before that fall back to
+parsing the range id, which works for every shape the game has produced —
+`1998`, `1970-1979`, `SFG_1994-2025`.

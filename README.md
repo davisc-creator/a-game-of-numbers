@@ -49,6 +49,14 @@ played there** takes everyone who passed through and uses their whole line for
 the era. Randy Johnson is 86 strikeouts to the Giants under the first and 3,749
 under the second.
 
+## Records
+
+Career stats per person, graded on points per game, points per pick, hit rate,
+average depth, best game, wins or total points. Tap anyone for a breakdown: the
+seasons they know, the clubs they know, per-category and per-era grading, head
+to head, a pick-depth histogram, and every game they have played with the picks
+and misses from each.
+
 ## Series
 
 Play a single game or a series: best of N, first to N wins, first to N points,

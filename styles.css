@@ -206,3 +206,32 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 /* series standings reuse the result rows; only the games list needs a nudge */
 #ser-table .result-row .sc{min-width:44px;text-align:right}
 #ser-history .hist:last-child{border-bottom:0}
+
+/* misses on the game board: same shape as a pick, visibly spent */
+.log-row.miss{opacity:.62}
+.log-row.miss .rk{color:var(--out)}
+.log-row.miss .tag{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  color:var(--pole);border:1px solid var(--rule);padding:1px 5px;margin-left:6px;border-radius:2px}
+
+/* game-by-game breakdown */
+.gm-row{border-bottom:1px solid rgba(61,99,83,.45)}
+.gm-head{display:flex;align-items:baseline;gap:10px;width:100%;background:transparent;
+  border:0;color:var(--chalk);padding:9px 2px;cursor:pointer;text-align:left;
+  font-family:'Barlow Condensed',sans-serif}
+.gm-head:hover{color:var(--pole)}
+.gm-head .d{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-dim);
+  font-weight:700;min-width:56px}
+.gm-head .c{flex:1;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-head .c .mono{color:var(--chalk-dim);font-size:12px}
+.gm-head .p{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--pole)}
+.gm-body{padding:2px 2px 10px 56px}
+.gm-meta{font-size:13px;color:var(--chalk-dim);margin-bottom:6px}
+.gm-pick{display:flex;gap:9px;align-items:baseline;font-size:15px;padding:2px 0}
+.gm-pick .r{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--pole);
+  min-width:34px;text-align:right}
+.gm-pick.miss{opacity:.6}
+.gm-pick.miss .r{color:var(--out)}
+.gm-pick .tag{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--chalk-dim);
+  border:1px solid var(--rule);padding:0 5px;margin-left:6px}
+.rec-stats.six{grid-template-columns:repeat(6,1fr)}
+@media (max-width:520px){.rec-stats.six{grid-template-columns:repeat(3,1fr)}}

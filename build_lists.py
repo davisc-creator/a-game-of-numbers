@@ -336,6 +336,33 @@ def write_globals(D):
     return len(order), len(flat)
 
 
+def write_played(D, franch):
+    """Which seasons a player appeared in and which clubs he appeared for.
+    The records screen splits a pick's points across them, so it can say which
+    decades and which franchises somebody actually knows."""
+    idx = D['idx_of']
+    years, clubs = {}, {}
+    for df in (D['bat'], D['pit']):
+        d = df[(df.yearID >= FIRST_YEAR) & (df.yearID <= LAST_YEAR)]
+        for pid, yr, tid in zip(d.playerID, d.yearID, d.teamID):
+            i = idx.get(pid)
+            if i is None:
+                continue
+            years.setdefault(i, set()).add(int(yr))
+            fr = franch.get((str(tid), int(yr)))
+            if fr:
+                clubs.setdefault(i, {}).setdefault(fr, set()).add(int(yr))
+    # clubs carry a season count, so a pick splits by how long he was there
+    # rather than evenly - Ruth's one Braves year is not half his career
+    out = {'y': {str(k): sorted(v) for k, v in sorted(years.items())},
+           'f': {str(k): {fr: len(ys) for fr, ys in sorted(v.items())}
+                 for k, v in sorted(clubs.items())}}
+    path = os.path.join(OUT_DIR, 'played.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(out, f, separators=(',', ':'))
+    return len(years), os.path.getsize(path)
+
+
 ##############################################################################
 # Per-team season lines. One row per player per franchise per season, so a
 # traded man's stats land with the club he earned them at - 8.2% of
@@ -483,6 +510,8 @@ def main():
     print(f"players.json {n_players}  awards.json {n_awards} player-seasons")
 
     franch, fnames, pos_of = load_teams()
+    n_played, played_sz = write_played(D, franch)
+    print(f"played.json  {n_played} players, {played_sz/1024/1024:.1f} MB")
     seasons, lg, sz = build_teams(D, franch, pos_of)
     with open(os.path.join(OUT_TEAMS, 'index.json'), 'w', encoding='utf-8') as f:
         json.dump({'first': FIRST_YEAR, 'last': LAST_YEAR, 'window': 10,

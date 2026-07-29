@@ -156,9 +156,12 @@
       <h2>Ball knowledge</h2>
       <div class="pill-set" id="rec-sort" style="margin-bottom:12px">
         <button class="pill" data-sort="ppg" aria-pressed="true">Points/game</button>
+        <button class="pill" data-sort="ppp">Points/pick</button>
         <button class="pill" data-sort="hit">Hit rate</button>
         <button class="pill" data-sort="depth">Avg depth</button>
+        <button class="pill" data-sort="best">Best game</button>
         <button class="pill" data-sort="wins">Wins</button>
+        <button class="pill" data-sort="pts">Total points</button>
       </div>
       <div id="rec-list"></div>
       <p class="hint" id="rec-empty">No games finished yet.</p>
@@ -200,6 +203,21 @@
       <h2>How deep he goes</h2>
       <div id="prof-hist"></div>
       <p class="hint">Where his correct picks landed on the board. Rightward is harder knowledge.</p>
+    </div>
+    <div class="card">
+      <h2>Seasons you know</h2>
+      <div id="prof-years"></div>
+      <p class="hint" id="prof-years-note"></p>
+    </div>
+    <div class="card">
+      <h2>Clubs you know</h2>
+      <div id="prof-clubs"></div>
+      <p class="hint" id="prof-clubs-note"></p>
+    </div>
+    <div class="card">
+      <h2>Game by game</h2>
+      <div id="prof-games"></div>
+      <p class="hint" id="prof-games-note"></p>
     </div>
     <div class="card">
       <h2>By category</h2>
@@ -284,6 +302,8 @@
       <h2>Off the board</h2>
       <div class="log" id="log"></div>
       <p class="hint" id="log-empty">Nothing drafted yet.</p>
+      <div class="grp-label" id="miss-label">Missed &mdash; out of play</div>
+      <div class="log" id="miss-log"></div>
     </div>
 
     <button class="btn ghost small" id="quit">End game</button>

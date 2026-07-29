@@ -467,8 +467,11 @@ function buildPool(){
      carries more than once. Keying the lookup by row reference survives the
      filter and sort below, which the index would not. */
   const who = side.who || {};
-  const whoOf = new Map();
-  side.rows.forEach((r, i) => { if (who[i]) whoOf.set(r, who[i]); });
+  const whoOf = new Map(), idOf = new Map();
+  side.rows.forEach((r, i) => {
+    if (who[i]) whoOf.set(r, who[i]);
+    if (side.ids) idOf.set(r, side.ids[i]);
+  });
 
   const scored = side.rows.filter(r => r[ci] > 0)
                           .sort((a, b) => asc ? a[ci] - b[ci] : b[ci] - a[ci]);
@@ -484,13 +487,15 @@ function buildPool(){
      a strike report "he was 153rd" instead of just "no". */
   const board = [], foul = [], off = [];
   scored.forEach((r, i) => {
-    const base = {name: r[0], val: r[ci], rank: ranks[i], who: whoOf.get(r) || null};
+    const base = {name: r[0], val: r[ci], rank: ranks[i], who: whoOf.get(r) || null,
+                  id: idOf.has(r) ? idOf.get(r) : null};
     if (base.rank <= SCORE_TO) board.push({...base, zone: 'board', drafted: false, by: null});
     else if (base.rank <= FOUL_TO) foul.push({...base, zone: 'foul', used: false});
     else off.push({...base, zone: 'off'});
   });
   for (const r of side.rows)
-    if (!(r[ci] > 0)) off.push({name: r[0], val: r[ci], rank: null, zone: 'off'});
+    if (!(r[ci] > 0)) off.push({name: r[0], val: r[ci], rank: null, zone: 'off',
+                                id: idOf.has(r) ? idOf.get(r) : null});
 
   const all = board.concat(foul, off);
   const byName = new Map(), byLast = new Map();
@@ -531,6 +536,10 @@ function resolve(raw){
     }
     const taken = list.filter(e => e.zone === 'board');
     if (taken.length)      return {k: 'taken', e: taken[0]};
+    /* somebody has already burned this name. It costs nothing to say it again,
+       exactly as naming a drafted player costs nothing. */
+    const gone = list.find(e => e.missed);
+    if (gone)              return {k: 'missed', e: gone};
     const f = list.filter(e => e.zone === 'foul' && !e.used);
     if (f.length)          return {k: 'foul', e: bestOf(f)};
     const off = list.filter(e => e.zone === 'off');
@@ -538,7 +547,7 @@ function resolve(raw){
       off.sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
       return {k: 'off', e: off[0]};
     }
-    return {k: 'usedfoul', e: list[0]};
+    return {k: 'missed', e: list[0]};
   };
 
   let r = pick(P.byName.get(q));
@@ -574,7 +583,7 @@ function startGame(){
     label: pool.label, abbr: pool.abbr, pool,
     players: S.seats.map((n, i) => ({name: (n.trim() || `Drafter ${i+1}`),
       pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: [], picked: []})),
-    round: 0, pos: 0, maxRounds: S.rounds, log: [], saved: false,
+    round: 0, pos: 0, maxRounds: S.rounds, log: [], misses: [], saved: false,
   };
   show('game');
   $('g-era').textContent = S.data.label + (S.post ? ' \u00b7 Postseason' : '');
@@ -613,6 +622,10 @@ function submitGuess(){
     setMsg(`${r.e.name} is already off the board. Pick again \u2014 no strike.`, 'warn');
     box.value = ''; focusGuess(); return;
   }
+  if (r.k === 'missed'){
+    setMsg(`${r.e.name} has already been missed. Pick again \u2014 no strike.`, 'warn');
+    box.value = ''; focusGuess(); return;
+  }
   if (r.k === 'ambiguous'){
     setMsg(`Too many matches: ${r.list.map(e => e.name).join(', ')}. Use a first name \u2014 no strike.`, 'warn');
     box.value = ''; focusGuess(); return;
@@ -621,7 +634,7 @@ function submitGuess(){
   if (r.k === 'suggest') return askConfirm(r.e, raw);
   if (r.k === 'hit')  return score(r.e);
   if (r.k === 'foul') return foul(r.e);
-  return strike(raw, r.k === 'off' || r.k === 'usedfoul' ? r.e : null);
+  return strike(raw, r.k === 'off' ? r.e : null);
 }
 
 /* Two different men, one name. Team and career span are the only things shown -
@@ -672,8 +685,8 @@ function score(e){
   const p = S.G.players[seat()];
   e.drafted = true; e.by = p.name;
   p.pts += e.rank; p.picks++; p.ranks.push(e.rank);
-  p.picked.push({n: e.name, r: e.rank});
-  S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val});
+  p.picked.push({n: e.name, r: e.rank, i: e.id});
+  S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val, id: e.id});
   clearMsg();
   setPlate(`${p.name} scores`, String(e.rank),
     `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
@@ -684,7 +697,8 @@ function score(e){
 /* Foul ball: free at two strikes, otherwise it costs one. Turn ends either way. */
 function foul(f){
   const p = S.G.players[seat()];
-  f.used = true; p.fouls++;
+  f.used = true; f.missed = true; p.fouls++;
+  S.G.misses.push({kind: 'foul', name: f.name, rank: f.rank, val: f.val, by: p.name});
   const free = p.strikes >= 2;
   if (!free) p.strikes++;
   clearMsg();
@@ -701,6 +715,10 @@ function foul(f){
 function strike(raw, e){
   const p = S.G.players[seat()];
   p.strikes++;
+  if (e) e.missed = true;
+  S.G.misses.push({kind: 'strike', name: e ? e.name : (raw || '').trim().slice(0, 28),
+                   rank: e ? e.rank : null, val: e ? e.val : null,
+                   real: !!e, by: p.name});
   let sub;
   if (e && e.rank)      sub = `${e.name} \u2014 ${fmtVal(e.val)} ${S.G.abbr}, ${ord(e.rank)}`
                               + (e.rank > FOUL_TO ? ` \u00b7 only the top ${SCORE_TO} score` : '');
@@ -723,7 +741,9 @@ function finish(){
     G.saved = true;
     const best = Math.max(...G.players.map(p => p.pts));
     rec = {ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
-      depth: G.pool.depth,
+      depth: G.pool.depth, y0: S.data && S.data.y0, y1: S.data && S.data.y1,
+      teams: (S.data && S.data.teams) || null,
+      misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by})),
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
         win: p.pts === best}))};
@@ -929,6 +949,18 @@ function renderGame(){
       <div class="who">${esc(r.by)}</div>
     </div>`).join('');
   $('log-empty').classList.toggle('hidden', G.log.length > 0);
+  /* misses sit under the taken list: a named man is out of play either way, and
+     seeing what has already been burned is half the information in the room */
+  const miss = G.misses || [];
+  $('miss-label').classList.toggle('hidden', !miss.length);
+  $('miss-log').innerHTML = miss.map(m => `
+    <div class="log-row miss">
+      <div class="rk">${m.rank ? m.rank : '\u2014'}</div>
+      <div class="pl">${esc(m.name)}${m.real === false ? '' :
+        ` <span class="mono">${m.val != null ? fmtVal(m.val) + ' ' + G.abbr : 'no ' + G.abbr}</span>`}
+        ${m.kind === 'foul' ? '<span class="tag">foul</span>' : ''}</div>
+      <div class="who">${esc(m.by)}</div>
+    </div>`).join('');
   const p = G.players[t];
   $('guess').placeholder = p ? `${p.name} \u2014 name a player` : 'Name a player';
 }
@@ -1054,15 +1086,19 @@ function careerStats(){
   return [...m.values()].map(r => ({...r,
     ppg: r.games ? r.pts / r.games : 0,
     hit: (r.picks + r.strikes) ? r.picks / (r.picks + r.strikes) : 0,
+    ppp: r.picks ? r.pts / r.picks : 0,
     depth: r.ranks.length ? r.ranks.reduce((a,b) => a+b, 0) / r.ranks.length : 0,
     deepest: r.ranks.length ? Math.max(...r.ranks) : 0,
   }));
 }
 const SORTERS = {
   ppg:  (a,b) => b.ppg - a.ppg,
+  ppp:  (a,b) => b.ppp - a.ppp || b.ppg - a.ppg,
   hit:  (a,b) => b.hit - a.hit || b.ppg - a.ppg,
   depth:(a,b) => b.depth - a.depth || b.ppg - a.ppg,
+  best: (a,b) => b.best - a.best || b.ppg - a.ppg,
   wins: (a,b) => b.wins - a.wins || b.ppg - a.ppg,
+  pts:  (a,b) => b.pts - a.pts,
 };
 function renderRecords(){
   const rows = careerStats().sort(SORTERS[S.recSort]);
@@ -1076,8 +1112,9 @@ function renderRecords(){
       </div>
       <div class="rec-stats">
         <div><b>${r.ppg.toFixed(1)}</b><span>pts/game</span></div>
+        <div><b>${r.ppp ? r.ppp.toFixed(0) : '\u2014'}</b><span>pts/pick</span></div>
         <div><b>${Math.round(r.hit*100)}%</b><span>hit rate</span></div>
-        <div><b>${r.depth ? r.depth.toFixed(0) : '\u2014'}</b><span>avg depth</span></div>
+        <div><b>${r.best || '\u2014'}</b><span>best game</span></div>
         <div><b>${r.deepest || '\u2014'}</b><span>deepest</span></div>
         <div><b>${r.fouls}</b><span>fouls</span></div>
       </div>
@@ -1107,6 +1144,30 @@ function renderRecords(){
 }
 
 /* --------------------------------------------------------------- profile */
+/* Which seasons and which clubs a player belongs to, so a pick's points can be
+   spread across them. Loaded once, lazily - the records screen is the only
+   thing that wants it. */
+const PX = {played: null, clubs: null};
+async function loadBreakdowns(){
+  if (PX.played) return;
+  const [played, ix] = await Promise.all([
+    fetch('data/played.json').then(r => r.json()).catch(() => ({y: {}, f: {}})),
+    fetch('data-teams/index.json').then(r => r.json()).catch(() => ({franchises: {}})),
+  ]);
+  PX.played = played;
+  PX.clubs = ix.franchises || {};
+  renderRecords();
+}
+
+/* A record written before this existed has no y0/y1; the range id still carries
+   the years for every shape of range the game has ever produced. */
+function recYears(g){
+  if (Number.isInteger(g.y0) && Number.isInteger(g.y1)) return [g.y0, g.y1];
+  const m = String(g.range || '').match(/(\d{4})(?:\D+(\d{4}))?/);
+  if (!m) return null;
+  return [+m[1], m[2] ? +m[2] : +m[1]];
+}
+
 /* Rescaled when scoring was cut to the top 100. The last bucket only holds
    picks from games played before that, which are still in people's records. */
 const DEPTH_BUCKETS = [[1,10,'1\u201310'], [11,25,'11\u201325'], [26,50,'26\u201350'],
@@ -1116,7 +1177,8 @@ function profileFor(name){
   const key = name.trim().toLowerCase();
   const mine = RECORDS.filter(g => (g.players||[]).some(p => (p.name||'').trim().toLowerCase() === key));
   const P = {name, games: mine.length, wins: 0, pts: 0, picks: 0, strikes: 0, fouls: 0,
-             ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map()};
+             ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map(),
+             years: new Map(), clubs: new Map(), log: []};
   for (const g of mine){
     const me = g.players.find(p => (p.name||'').trim().toLowerCase() === key);
     const ranks = (me.picked && me.picked.length) ? me.picked.map(x => x.r) : (me.ranks || []);
@@ -1126,12 +1188,12 @@ function profileFor(name){
 
     const bump = (map, k, label) => {
       let e = map.get(k);
-      if (!e){ e = {label, games:0, ranks:[], picks:0, strikes:0}; map.set(k, e); }
+      if (!e){ e = {label, games:0, ranks:[], picks:0, strikes:0, pts:0}; map.set(k, e); }
       e.games++; e.ranks.push(...ranks); e.picks += me.picks||0; e.strikes += me.strikes||0;
       return e;
     };
-    bump(P.cats, g.cat, (g.label || g.cat) + (g.post ? ' (post)' : ''));
-    bump(P.eras, g.range || '?', g.range || 'Unknown');
+    bump(P.cats, g.cat, (g.label || g.cat) + (g.post ? ' (post)' : '')).pts += me.pts || 0;
+    bump(P.eras, g.range || '?', g.range || 'Unknown').pts += me.pts || 0;
 
     for (const o of g.players){
       const ok = (o.name||'').trim().toLowerCase();
@@ -1144,23 +1206,65 @@ function profileFor(name){
     }
     for (const pk of (me.picked || []))
       P.sig.set(pk.n, (P.sig.get(pk.n) || 0) + 1);
+
+    /* Spread each pick across the seasons he played inside this era, and across
+       his clubs weighted by how long he was at each. Splitting rather than
+       counting him whole in every bucket keeps the totals reconciling with the
+       points actually scored. */
+    const span = recYears(g);
+    if (PX.played){
+      for (const pk of (me.picked || [])){
+        if (pk.i == null) continue;
+        const all = PX.played.y[pk.i] || [];
+        const inside = span ? all.filter(y => y >= span[0] && y <= span[1]) : all;
+        /* fall back to his whole career if none of it lands inside the era -
+           otherwise those points quietly disappear and the chart stops
+           reconciling with the score */
+        const ys = inside.length ? inside : all;
+        if (ys.length){
+          const share = pk.r / ys.length;
+          for (const y of ys) P.years.set(y, (P.years.get(y) || 0) + share);
+        } else P.unplaced = (P.unplaced || 0) + pk.r;
+        const cl = PX.played.f[pk.i] || {};
+        const tot = Object.values(cl).reduce((a, b) => a + b, 0);
+        if (tot) for (const [fr, n] of Object.entries(cl))
+          P.clubs.set(fr, (P.clubs.get(fr) || 0) + pk.r * n / tot);
+      }
+    }
+
+    P.log.push({ts: g.ts, label: g.label || g.cat, range: g.range, post: g.post,
+                pts: me.pts || 0, picks: me.picks || 0, strikes: me.strikes || 0,
+                fouls: me.fouls || 0, win: !!me.win, teams: g.teams || null,
+                picked: (me.picked || []).slice(), misses: g.misses || [],
+                against: g.players.filter(o => (o.name || '').trim().toLowerCase() !== key)
+                                  .map(o => ({name: o.name, pts: o.pts}))});
   }
   const avg = a => a.length ? a.reduce((x,y) => x+y, 0) / a.length : 0;
   P.ppg = P.games ? P.pts / P.games : 0;
   P.hit = (P.picks + P.strikes) ? P.picks / (P.picks + P.strikes) : 0;
   P.depth = avg(P.ranks);
   P.deepest = P.ranks.length ? Math.max(...P.ranks) : 0;
+  /* points per game per era answers "which decades do you actually know", which
+     average rank does not - a shallow list caps how deep anyone can go. Set
+     before shape() copies these, or the copies come out without it. */
+  for (const m of [P.cats, P.eras])
+    for (const e of m.values()) e.ppg = e.games ? e.pts / e.games : 0;
   const shape = m => [...m.values()].map(e => ({...e, depth: avg(e.ranks),
     hit: (e.picks+e.strikes) ? e.picks/(e.picks+e.strikes) : 0}))
     .filter(e => e.ranks.length).sort((a,b) => b.depth - a.depth);
   P.catList = shape(P.cats);
   P.eraList = shape(P.eras);
   P.h2hList = [...P.h2h.values()].sort((a,b) => b.games - a.games);
+  P.yearList = [...P.years.entries()].sort((a, b) => a[0] - b[0]);
+  P.clubList = [...P.clubs.entries()].sort((a, b) => b[1] - a[1]);
+  P.log.sort((a, b) => b.ts - a.ts);
+  P.best = P.log.reduce((m, g) => Math.max(m, g.pts), 0);
   P.sigList = [...P.sig.entries()].filter(([,n]) => n > 1).sort((a,b) => b[1] - a[1]).slice(0, 10);
   return P;
 }
 
 function renderProfile(name){
+  S.profName = name;
   const P = profileFor(name);
   $('prof-name').textContent = P.name;
   $('prof-top').innerHTML = [
@@ -1189,7 +1293,80 @@ function renderProfile(name){
   $('prof-cats-note').textContent = P.catList.length > 1
     ? `Strongest: ${P.catList[0].label} at ${P.catList[0].depth.toFixed(0)} average. Weakest: ${P.catList[P.catList.length-1].label} at ${P.catList[P.catList.length-1].depth.toFixed(0)}.`
     : 'Play a few categories and the split shows up here.';
-  $('prof-eras').innerHTML = P.eraList.length ? brk(P.eraList) : '<p class="hint">Nothing yet.</p>';
+  /* eras are graded on points per game, not average rank: a shallow list caps
+     how deep anyone can go, so rank flatters the eras nobody knows well */
+  $('prof-eras').innerHTML = P.eraList.length ? P.eraList.slice()
+    .sort((a, b) => (b.ppg || 0) - (a.ppg || 0)).map(e => `
+    <div class="brk">
+      <div class="t">${esc(e.label)}</div>
+      <div class="s">${e.games} game${e.games===1?'':'s'} \u00b7 depth ${e.depth.toFixed(0)}</div>
+      <div class="v">${(e.ppg || 0).toFixed(0)}</div>
+    </div>`).join('') : '<p class="hint">Nothing yet.</p>';
+
+  /* ---- seasons ---- */
+  const bar = (rows, fmt) => {
+    const max = Math.max(1, ...rows.map(r => r[1]));
+    return rows.map(r => `
+      <div class="bar-row">
+        <div class="lab">${esc(String(r[0]))}</div>
+        <div class="track"><div class="fill" style="width:${r[1] / max * 100}%"></div></div>
+        <div class="n">${fmt(r[1])}</div>
+      </div>`).join('');
+  };
+  const round0 = v => String(Math.round(v));
+  if (!PX.played){
+    $('prof-years').innerHTML = '<p class="hint">Loading the season index\u2026</p>';
+    $('prof-clubs').innerHTML = '';
+    loadBreakdowns().then(() => { if (S.profName === name) renderProfile(name); });
+  } else {
+    /* group into decades once there are more than ~25 seasons to show */
+    const ys = P.yearList;
+    const wide = ys.length > 25;
+    const rows = wide
+      ? [...ys.reduce((m, [y, v]) => m.set(Math.floor(y / 10) * 10, (m.get(Math.floor(y / 10) * 10) || 0) + v), new Map())]
+          .sort((a, b) => a[0] - b[0]).map(([d, v]) => [d + 's', v])
+      : ys;
+    $('prof-years').innerHTML = rows.length ? bar(rows, round0)
+      : '<p class="hint">No successful picks yet.</p>';
+    $('prof-years-note').textContent = rows.length
+      ? `A pick is shared across the seasons that player was active inside the era it was played, so these add up to his ${Math.round(P.pts)} points.`
+        + (P.unplaced ? ` ${Math.round(P.unplaced)} could not be placed in a season.` : '')
+      : '';
+
+    const cl = P.clubList.slice(0, 14);
+    $('prof-clubs').innerHTML = cl.length
+      ? bar(cl.map(([f, v]) => [(PX.clubs[f] || {}).name || f, v]), round0)
+      : '<p class="hint">No successful picks yet.</p>';
+    $('prof-clubs-note').textContent = cl.length
+      ? 'A pick is shared across the clubs he played for, weighted by how long he was at each.'
+      : '';
+  }
+
+  /* ---- game by game ---- */
+  $('prof-games').innerHTML = P.log.length ? P.log.slice(0, 30).map((g, i) => `
+    <div class="gm-row">
+      <button class="gm-head" data-game="${i}" aria-expanded="false">
+        <span class="d">${new Date(g.ts).toLocaleDateString('en-US', {month:'short', day:'numeric'})}</span>
+        <span class="c">${esc(g.label)}<span class="mono"> ${esc(g.range || '')}${g.post ? ' post' : ''}</span></span>
+        <span class="p">${g.pts}</span>
+      </button>
+      <div class="gm-body hidden" id="gm-${i}">
+        <div class="gm-meta">${g.picks} pick${g.picks===1?'':'s'} \u00b7 ${g.strikes} strike${g.strikes===1?'':'s'} \u00b7 ${g.fouls} foul${g.fouls===1?'':'s'}${g.win ? ' \u00b7 won' : ''}${g.against.length ? ' \u00b7 vs ' + g.against.map(o => esc(o.name) + ' ' + o.pts).join(', ') : ''}</div>
+        ${g.picked.length ? g.picked.slice().sort((a,b) => a.r - b.r).map(pk =>
+          `<div class="gm-pick"><span class="r">${pk.r}</span>${esc(pk.n)}</div>`).join('')
+          : '<div class="gm-pick"><span class="r">\u2014</span>nothing landed</div>'}
+        ${(g.misses || []).filter(m => m.by === P.name).map(m =>
+          `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}</span></div>`).join('')}
+      </div>
+    </div>`).join('') : '<p class="hint">No games yet.</p>';
+  $('prof-games').querySelectorAll('[data-game]').forEach(el => el.onclick = () => {
+    const b = $('gm-' + el.dataset.game);
+    const open = !b.classList.contains('hidden');
+    b.classList.toggle('hidden', open);
+    el.setAttribute('aria-expanded', String(!open));
+  });
+  $('prof-games-note').textContent = P.log.length
+    ? `Best game: ${P.best}. Tap any line for the picks and the misses.` : '';
 
   $('prof-h2h').innerHTML = P.h2hList.length ? P.h2hList.map(h => `
     <div class="brk">
