@@ -898,6 +898,51 @@ group('misspellings, mononyms and nicknames');
   ok(!/\d/.test(visible), 'no number reaches the screen — not the rank, not the stat');
 }
 
+group('an empty breakdown says which kind of empty');
+{
+  /* picks recorded before the app stored a player id cannot be placed in a
+     season or a club. Telling somebody with plenty of picks that they have none
+     reads as a bug, which is what it looked like. */
+  app.setRecords([
+    {ts: 30, range: '2010-2019', y0: 2010, y1: 2019, cat: 'bat_h', label: 'Hits', post: false,
+     players: [{name: 'Carson', pts: 30, picks: 2, strikes: 0, fouls: 0, ranks: [10, 20],
+                picked: [{n: 'A', r: 10}, {n: 'B', r: 20}], win: true}]},
+  ]);
+  app.PX.played = {y: {1: [2011]}, f: {1: {NYY: 1}}}; app.PX.ok = true; app.PX.clubs = {};
+  const P = app.profileFor('Carson');
+  eq(P.idless, 2, 'picks with no player id are counted');
+  eq(P.yearList.length, 0, 'and none of them can be placed');
+  app.S.profName = 'Carson';
+  app.renderProfile('Carson');
+  const html = app.__els.get('prof-years').innerHTML;
+  ok(/recorded before/i.test(html), 'the screen says why they are missing');
+  ok(!/No successful picks/i.test(html), 'rather than claiming there were none');
+}
+{
+  /* a season index that would not load is a third thing again, and cache-first
+     on /data/ means a cached 404 would otherwise persist silently */
+  app.PX.played = {y: {}, f: {}}; app.PX.ok = false;
+  app.renderProfile('Carson');
+  ok(/could not be loaded/i.test(app.__els.get('prof-years').innerHTML),
+     'a missing season index says so instead');
+}
+{
+  /* mixed old and new: the note must not claim to reconcile with points it left out */
+  app.setRecords([
+    {ts: 40, range: '2010-2019', y0: 2010, y1: 2019, cat: 'bat_h', label: 'Hits', post: false,
+     players: [{name: 'Carson', pts: 30, picks: 2, strikes: 0, fouls: 0, ranks: [10, 20],
+                picked: [{n: 'A', r: 10, i: 1}, {n: 'B', r: 20}], win: true}]},
+  ]);
+  app.PX.played = {y: {1: [2011]}, f: {1: {NYY: 1}}}; app.PX.ok = true;
+  const P = app.profileFor('Carson');
+  eq(P.idless, 1, 'the one placeless pick is counted');
+  eq(P.idlessPts, 20, 'along with its points');
+  app.renderProfile('Carson');
+  const note = app.__els.get('prof-years-note').textContent;
+  ok(/add up to his 10 points/.test(note), 'the note claims only what it actually placed');
+  ok(/1 older pick could not be placed/.test(note), 'and says what it left out');
+}
+
 group('shipped data');
 {
   const manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));

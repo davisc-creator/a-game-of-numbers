@@ -1357,14 +1357,23 @@ function renderRecords(){
 /* Which seasons and which clubs a player belongs to, so a pick's points can be
    spread across them. Loaded once, lazily - the records screen is the only
    thing that wants it. */
-const PX = {played: null, clubs: null};
+const PX = {played: null, clubs: null, ok: false};
 async function loadBreakdowns(){
   if (PX.played) return;
+  /* An empty stand-in keeps the screen rendering when the index will not load,
+     but it must not be mistaken for a real answer: everything downstream then
+     finds nothing and would otherwise report "no successful picks" to someone
+     who has plenty. PX.ok is what tells the two apart. A bad status has to be
+     caught explicitly - /data/ is cache-first in the service worker, so a 404
+     cached once would otherwise be served for good. */
   const [played, ix] = await Promise.all([
-    fetch('data/played.json').then(r => r.json()).catch(() => ({y: {}, f: {}})),
-    fetch('data-teams/index.json').then(r => r.json()).catch(() => ({franchises: {}})),
+    fetch('data/played.json').then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+      .catch(() => null),
+    fetch('data-teams/index.json').then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+      .catch(() => ({franchises: {}})),
   ]);
-  PX.played = played;
+  PX.ok = !!(played && played.y && Object.keys(played.y).length);
+  PX.played = played || {y: {}, f: {}};
   PX.clubs = ix.franchises || {};
   renderRecords();
 }
@@ -1391,7 +1400,7 @@ function profileFor(name){
              ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map(),
              years: new Map(), clubs: new Map(), log: [], h2hYears: new Map(),
              turns: 0, firstOk: 0, streak: 0, rarePts: 0, rareList: [],
-             rareN: 0, rareSum: 0};
+             rareN: 0, rareSum: 0, idless: 0, idlessPts: 0};
   for (const g of mine){
     const me = g.players.find(p => (p.name||'').trim().toLowerCase() === key);
     const ranks = (me.picked && me.picked.length) ? me.picked.map(x => x.r) : (me.ranks || []);
@@ -1448,6 +1457,10 @@ function profileFor(name){
     }
     for (const pk of (me.picked || [])){
       P.sig.set(pk.n, (P.sig.get(pk.n) || 0) + 1);
+      /* Records written before picks carried a player id cannot be placed in a
+         season or a club. Counting them is what lets the screen say so instead
+         of claiming there were no picks at all. */
+      if (pk.i == null){ P.idless++; P.idlessPts += pk.r || 0; }
       const v = RX.of(RX.key(pk), key);
       if (v != null){
         P.rarePts += (pk.r || 0) * v;
@@ -1627,19 +1640,34 @@ function renderProfile(name){
       ? [...ys.reduce((m, [y, v]) => m.set(Math.floor(y / 10) * 10, (m.get(Math.floor(y / 10) * 10) || 0) + v), new Map())]
           .sort((a, b) => a[0] - b[0]).map(([d, v]) => [d + 's', v])
       : ys;
+    /* An empty chart has three quite different causes and they must not read
+       the same. Telling somebody with forty picks that they have none reads as
+       a bug, which is exactly what it looked like. */
+    const empty = !PX.ok
+      ? 'The season index could not be loaded, so these cannot be worked out. Reopen this screen once you are back online.'
+      : (P.picks && P.idless === P.picks)
+        ? `These ${P.picks} picks were recorded before the app kept track of which player was picked, so they cannot be placed. Games from here on will show up.`
+        : 'No successful picks yet.';
+    /* the chart shows what could actually be placed, so the total it claims to
+       reconcile with has to exclude what could not */
+    const placed = Math.round(P.pts - P.idlessPts - (P.unplaced || 0));
+    const skipped = P.idless
+      ? ` ${P.idless} older pick${P.idless === 1 ? '' : 's'} could not be placed and ${P.idless === 1 ? 'is' : 'are'} not counted here.`
+      : '';
+
     $('prof-years').innerHTML = rows.length ? bar(rows, round0)
-      : '<p class="hint">No successful picks yet.</p>';
+      : `<p class="hint">${esc(empty)}</p>`;
     $('prof-years-note').textContent = rows.length
-      ? `A pick is shared across the seasons that player was active inside the era it was played, so these add up to his ${Math.round(P.pts)} points.`
-        + (P.unplaced ? ` ${Math.round(P.unplaced)} could not be placed in a season.` : '')
+      ? `A pick is shared across the seasons that player was active inside the era it was played, so these add up to his ${placed} points.`
+        + (P.unplaced ? ` ${Math.round(P.unplaced)} could not be placed in a season.` : '') + skipped
       : '';
 
     const cl = P.clubList.slice(0, 14);
     $('prof-clubs').innerHTML = cl.length
       ? bar(cl.map(([f, v]) => [(PX.clubs[f] || {}).name || f, v]), round0)
-      : '<p class="hint">No successful picks yet.</p>';
+      : `<p class="hint">${esc(empty)}</p>`;
     $('prof-clubs-note').textContent = cl.length
-      ? 'A pick is shared across the clubs he played for, weighted by how long he was at each.'
+      ? 'A pick is shared across the clubs he played for, weighted by how long he was at each.' + skipped
       : '';
   }
 

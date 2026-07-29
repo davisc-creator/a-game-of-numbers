@@ -360,7 +360,7 @@ Not requested yet; the owner will direct priorities.
   app fetches JSON.
 - Verify with `node --check app.js` after edits.
 - **Run all three suites before every commit** — `node tests/run.js`,
-  `node tests/run1620.js`, `node tests/run-shell.js`. 425 assertions, no
+  `node tests/run1620.js`, `node tests/run-shell.js`. 434 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way.
   The last third of the suite walks all 247 data files and builds all 7,331
@@ -504,6 +504,18 @@ Two edges worth keeping:
 Records also carry `y0`/`y1` now. Records written before that fall back to
 parsing the range id, which works for every shape the game has produced —
 `1998`, `1970-1979`, `SFG_1994-2025`.
+
+**An empty chart has three causes and they must not read alike.** Picks are
+placed by the player id in `picked[].i`, which only games from 2026-07-28 19:34
+onward carry — before that a record has `picked` but no ids, and nothing about
+those games can ever be placed. Add the season index failing to load and there
+are three quite different reasons for a blank chart, all of which used to print
+"No successful picks yet" at someone who had plenty. `PX.ok` marks whether
+`played.json` really loaded (a bad status has to be caught explicitly, since
+`/data/` is cache-first in the service worker and a 404 cached once would be
+served for good), and `P.idless`/`P.idlessPts` count what predates the ids. The
+reconciliation note excludes what it could not place rather than claiming a
+total it did not chart.
 
 
 ---
