@@ -37,7 +37,7 @@
       <h2>Who's drafting</h2>
       <div id="seats"></div>
       <button class="btn ghost small" id="add-seat">+ Add drafter</button>
-      <p class="hint">Use real names &mdash; records track people across games by name.</p>
+      <p class="hint" id="seat-note">Use real names &mdash; records track people across games by name.</p>
     </div>
 
     <div class="card">
@@ -94,7 +94,7 @@
       <div class="pill-set" id="cats-awd"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="fmt-card">
       <h2>Format</h2>
       <div class="pill-set" id="fmt-set">
         <button class="pill" data-fmt="single" aria-pressed="true">Single game</button>
@@ -127,7 +127,7 @@
       <div class="pill-set" id="rounds-set">
         <button class="pill" data-rounds="8">8 rounds</button>
         <button class="pill" data-rounds="12" aria-pressed="true">12 rounds</button>
-        <button class="pill" data-rounds="0">Until everyone's out</button>
+        <button class="pill" data-rounds="0" id="rounds-out">Until everyone's out</button>
       </div>
     </div>
 

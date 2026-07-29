@@ -90,6 +90,7 @@ function loadApp(){
    teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
+   soloPriorBest, renderSeats,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
@@ -896,6 +897,72 @@ group('misspellings, mononyms and nicknames');
   ok(!/rank/i.test(html), 'and never says rank');
   const visible = html.replace(/<[^>]*>/g, ' ');
   ok(!/\d/.test(visible), 'no number reaches the screen — not the rank, not the stat');
+}
+
+group('solo practice');
+{
+  /* one drafter is an ordinary game with nobody else in it: same board, same
+     rules, same scoring. The engine already handled it; only the records had
+     to learn that nothing is won. */
+  const G = gameOn(app, 'bat_h6', ['Solo']);
+  eq(G.players.length, 1, 'a game can be started with one drafter');
+  eq(app.order(0), [0], 'the snake order is just the one seat');
+  eq(app.order(1), [0], 'in both directions');
+  app.score(G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();
+  eq(G.players[0].pts, 3, 'a solo pick scores its rank as usual');
+  ok(!G.players[0].out, 'and play carries on');
+}
+{
+  /* three strikes ends a solo game rather than hanging: alive() hits zero */
+  app.setRecords([]);
+  const G = gameOn(app, 'bat_h6', ['Solo']);
+  for (let i = 0; i < 3; i++){
+    app.S.G.pos = 0; app.S.G.round = 0;
+    app.strike('nobody', null); app.__drain();
+  }
+  ok(G.players[0].out, 'three strikes puts the solo player out');
+  ok(G.saved, 'and the game ends and is recorded rather than hanging');
+  const rec = app.getRecords()[0];
+  ok(rec.solo, 'the record is marked solo');
+  eq(rec.players[0].win, false, 'and nothing was won — there was nobody to beat');
+}
+{
+  /* the win column must not read as a losing streak once anyone practises */
+  const rows = app.careerStats();
+  const solo = rows.find(r => r.name === 'Solo');
+  eq(solo.games, 1, 'a solo game still counts as a game played');
+  eq(solo.wins, 0, 'with no win');
+  eq(solo.solo, 1, 'but is counted as solo, so the zero is explained');
+  for (const k of Object.keys(app.SORTERS))
+    ok(Number.isFinite(app.SORTERS[k](rows[0], rows[0])), `sorting by ${k} still returns a number`);
+}
+{
+  /* something to beat: the best previous attempt at this same board */
+  app.setRecords([
+    {ts: 1, solo: true, range: 'test', post: false, cat: 'bat_h6', label: 'Hits Deep',
+     players: [{name: 'Solo', pts: 40, picks: 2, strikes: 3, fouls: 0, ranks: [], picked: [], win: false}]},
+    {ts: 2, solo: true, range: 'test', post: false, cat: 'bat_h6', label: 'Hits Deep',
+     players: [{name: 'Solo', pts: 90, picks: 3, strikes: 3, fouls: 0, ranks: [], picked: [], win: false}]},
+    {ts: 3, solo: true, range: 'test', post: false, cat: 'bat_hr', label: 'Home Runs',
+     players: [{name: 'Solo', pts: 500, picks: 9, strikes: 3, fouls: 0, ranks: [], picked: [], win: false}]},
+  ]);
+  const G = {players: [{name: 'Solo'}], cat: 'bat_h6', rangeId: 'test', post: false};
+  eq(app.soloPriorBest(G), 90, 'the best previous solo score on this board');
+  eq(app.soloPriorBest({...G, cat: 'bat_hr'}), 500, 'a different category is its own board');
+  eq(app.soloPriorBest({...G, rangeId: 'other'}), null, 'and so is a different era');
+  eq(app.soloPriorBest({...G, post: true}), null, 'postseason is a different board again');
+  eq(app.soloPriorBest({...G, players: [{name: 'Nobody'}]}), null, 'a first attempt compares against nothing');
+  eq(app.soloPriorBest({players: [{name: 'Solo'}, {name: 'Other'}], cat: 'bat_h6', rangeId: 'test', post: false}),
+     null, 'and a two-player game has no solo best at all');
+}
+{
+  /* a series needs somebody to be ahead of */
+  app.S.seats = ['Solo']; app.S.fmt.on = true;
+  app.renderSeats();
+  eq(app.S.fmt.on, false, 'choosing one drafter turns a series off');
+  app.S.seats = ['A', 'B'];
+  app.renderSeats();
+  ok(true, 'and two drafters render without complaint');
 }
 
 group('an empty breakdown says which kind of empty');

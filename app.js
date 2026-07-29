@@ -892,17 +892,26 @@ function strike(raw, e){
 function finish(){
   const G = S.G;
   let rec = null;
+  /* Read before writing: practising needs a number to beat, and it has to be
+     the best from *previous* attempts at this same board, not counting the one
+     just played. Computed here because the record is pushed a few lines down. */
+  const soloBest = soloPriorBest(G);
   if (!G.saved){
     G.saved = true;
     const best = Math.max(...G.players.map(p => p.pts));
+    /* Solo practice has nobody to beat, so nothing is won. Marking every solo
+       game a win would have made the win column meaningless the moment anyone
+       practised; leaving `win` false without saying why would read as a long
+       losing streak. The flag lets the records screen tell the difference. */
+    const solo = G.players.length === 1;
     rec = {ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
       depth: G.pool.depth, y0: S.data && S.data.y0, y1: S.data && S.data.y1,
-      teams: (S.data && S.data.teams) || null,
+      teams: (S.data && S.data.teams) || null, solo,
       misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by})),
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
         turns: p.turns, firstOk: p.firstOk, seq: p.seq,
-        win: p.pts === best}))};
+        win: !solo && p.pts === best}))};
     /* the series fields ride along on an otherwise ordinary game record, so
        nothing that reads records has to know series exist */
     if (S.SR){ rec.sid = S.SR.id; rec.sno = S.SR.games.length + 1; rec.smode = S.SR.mode; rec.sn = S.SR.n; }
@@ -911,7 +920,11 @@ function finish(){
   }
   const ranked = [...G.players].sort((a, b) => b.pts - a.pts);
   const top = ranked[0].pts, winners = ranked.filter(p => p.pts === top);
-  $('over-head').textContent = winners.length > 1 ? 'Tie at the top' : `${winners[0].name} wins`;
+  $('over-head').textContent = G.players.length === 1
+    ? (soloBest == null ? `${top} points`
+       : top > soloBest ? `${top} points — your best on this board`
+       : `${top} points · best ${soloBest}`)
+    : winners.length > 1 ? 'Tie at the top' : `${winners[0].name} wins`;
   $('results').innerHTML = ranked.map((p, i) => `
     <div class="result-row ${p.pts === top ? 'win' : ''}">
       <div class="pos">${i+1}</div>
@@ -928,6 +941,24 @@ function finish(){
     return show('series');
   }
   show('over');
+}
+
+/* Best this person has scored solo on this exact board before. Same category,
+   same range, same postseason flag - a different board is a different problem,
+   the same way streaks do not carry between games. Null when this is the first
+   attempt, so the screen can say nothing rather than compare against zero. */
+function soloPriorBest(G){
+  if (!G || G.players.length !== 1) return null;
+  const who = (G.players[0].name || '').trim().toLowerCase();
+  let best = null;
+  for (const g of RECORDS){
+    if (!g.solo || g.cat !== G.cat || g.range !== G.rangeId || !!g.post !== !!G.post) continue;
+    for (const p of (g.players || [])){
+      if ((p.name || '').trim().toLowerCase() !== who) continue;
+      if (best == null || (p.pts || 0) > best) best = p.pts || 0;
+    }
+  }
+  return best;
 }
 
 /* ---------------------------------------------------------------- series */
@@ -1139,13 +1170,25 @@ function renderSeats(){
     <div class="seat">
       <div class="num">${i+1}</div>
       <input type="text" data-seat="${i}" value="${esc(n)}" placeholder="Drafter ${i+1}" maxlength="16">
-      ${S.seats.length > 2 ? `<button data-drop="${i}" aria-label="Remove drafter ${i+1}">\u2715</button>` : ''}
+      ${S.seats.length > 1 ? `<button data-drop="${i}" aria-label="Remove drafter ${i+1}">\u2715</button>` : ''}
     </div>`).join('');
   $('seats').querySelectorAll('input').forEach(el =>
     el.oninput = e => S.seats[+e.target.dataset.seat] = e.target.value);
   $('seats').querySelectorAll('button').forEach(el =>
     el.onclick = e => { S.seats.splice(+e.target.dataset.drop, 1); renderSeats(); });
   $('add-seat').disabled = S.seats.length >= 4;
+  /* One drafter is solo practice: the same board and the same rules, with
+     nobody taking players off it and nothing to win. Saying so on the setup
+     screen matters because everything else here is worded for a room. */
+  const solo = S.seats.length === 1;
+  $('seat-note').textContent = solo
+    ? 'Solo practice \u2014 no opponent, nothing to win, and the game is not counted as a win in your records. Pick "Until you are out" to keep going until three strikes.'
+    : 'Use real names \u2014 records track people across games by name.';
+  $('rounds-out').textContent = solo ? 'Until you are out' : "Until everyone's out";
+  $('start').textContent = solo ? 'Start solo practice' : 'Start draft';
+  /* a series needs somebody to be ahead of */
+  $('fmt-card').classList.toggle('hidden', solo);
+  if (solo) S.fmt.on = false;
 }
 
 function renderRanges(){
@@ -1275,9 +1318,12 @@ function careerStats(){
     const k = (p.name || '').trim().toLowerCase();
     if (!k) continue;
     let r = m.get(k);
-    if (!r){ r = {name: p.name.trim(), games:0, wins:0, pts:0, picks:0, strikes:0, fouls:0,
+    if (!r){ r = {name: p.name.trim(), games:0, wins:0, solo:0, pts:0, picks:0, strikes:0, fouls:0,
                   ranks:[], best:0, turns:0, firstOk:0, streak:0, rare:0, rareN:0}; m.set(k, r); }
     r.games++; if (p.win) r.wins++;
+    /* solo games are counted but never won, so the win column has to say how
+       many of the games were unwinnable or it reads as a losing streak */
+    if (g.solo || (g.players || []).length === 1) r.solo++;
     r.pts += p.pts||0; r.picks += p.picks||0; r.strikes += p.strikes||0; r.fouls += p.fouls||0;
     r.turns += p.turns||0; r.firstOk += p.firstOk||0;
     r.streak = Math.max(r.streak, bestStreak(p.seq));
@@ -1318,7 +1364,7 @@ function renderRecords(){
       <div class="rec-head">
         <div class="pos">${i+1}</div>
         <div class="nm">${esc(r.name)}</div>
-        <div class="gm">${r.games} game${r.games===1?'':'s'} \u00b7 ${r.wins} won</div>
+        <div class="gm">${r.games} game${r.games===1?'':'s'} \u00b7 ${r.wins} won${r.solo ? ` \u00b7 ${r.solo} solo` : ''}</div>
       </div>
       <div class="rec-stats">
         <div><b>${r.ppg.toFixed(1)}</b><span>pts/game</span></div>
@@ -1400,12 +1446,13 @@ function profileFor(name){
              ranks: [], cats: new Map(), eras: new Map(), h2h: new Map(), sig: new Map(),
              years: new Map(), clubs: new Map(), log: [], h2hYears: new Map(),
              turns: 0, firstOk: 0, streak: 0, rarePts: 0, rareList: [],
-             rareN: 0, rareSum: 0, idless: 0, idlessPts: 0};
+             rareN: 0, rareSum: 0, idless: 0, idlessPts: 0, solo: 0};
   for (const g of mine){
     const me = g.players.find(p => (p.name||'').trim().toLowerCase() === key);
     const ranks = (me.picked && me.picked.length) ? me.picked.map(x => x.r) : (me.ranks || []);
     const span = recYears(g);          // needed by both the h2h and season splits
     if (me.win) P.wins++;
+    if (g.solo || (g.players || []).length === 1) P.solo++;
     P.pts += me.pts||0; P.picks += me.picks||0; P.strikes += me.strikes||0; P.fouls += me.fouls||0;
     P.turns += me.turns||0; P.firstOk += me.firstOk||0;
     P.streak = Math.max(P.streak, bestStreak(me.seq));
@@ -1561,7 +1608,8 @@ function renderProfile(name){
   const P = profileFor(name);
   $('prof-name').textContent = P.name;
   $('prof-top').innerHTML = [
-    [P.games, 'games'], [P.wins, 'wins'], [P.ppg.toFixed(1), 'pts/game'],
+    [P.games, 'games'], [P.wins, P.solo ? `wins · ${P.solo} solo` : 'wins'],
+    [P.ppg.toFixed(1), 'pts/game'],
     [Math.round(P.hit*100) + '%', 'hit rate'],
     [P.turns ? Math.round(P.first*100) + '%' : '\u2014', 'first guess'],
     [P.streak || '\u2014', 'best streak'],

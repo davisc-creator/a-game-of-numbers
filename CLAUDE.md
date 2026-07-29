@@ -114,7 +114,8 @@ value and rank, which needs every player, not just the ranked ones.
 
 ## Rules the code implements
 
-- Snake draft, 2–4 players, pass-and-play on one device.
+- Snake draft, 1–4 players, pass-and-play on one device. One is solo practice —
+  see below.
 - **Rank 1–100 scores its own rank.** Rank 87 is worth 87 points.
 - **Rank 101–110 is the foul band.** Costs a strike below two, free at two.
   Either way the turn ends; each of the ten only works once.
@@ -324,6 +325,34 @@ is capped at 99 games so a series of nothing but draws cannot run forever.
 
 ---
 
+## Solo practice
+
+One drafter. **No new engine** — the same board, the same snake order over a
+seat of one, the same scoring, the same three strikes. `order`, `seat`,
+`advance` and `alive` all already handled a single player; the floor was a UI
+one, and the only real work was stopping the records from lying about it.
+
+- **Nothing is won.** `win` is false for every solo game and the record carries
+  `solo: true`. Marking the lone player a winner would have made the win column
+  meaningless the moment anybody practised; leaving `win` false with nothing to
+  explain it reads as a long losing streak. So `careerStats` and `profileFor`
+  both count `solo`, and the records list and profile show it next to the wins.
+- **A series needs somebody to be ahead of.** Choosing one drafter hides the
+  format card and forces `S.fmt.on` off. A best-of-three against nobody would
+  never resolve, and first-to-N-wins would run to its 99-game cap.
+- **`soloPriorBest` is the point of practising.** It reports the best previous
+  solo score on this *exact* board — same category, same range, same postseason
+  flag — because a different board is a different problem, the same reason
+  streaks do not carry between games. Null on a first attempt, so the screen
+  says the score rather than comparing against zero. It is read at the top of
+  `finish` because the new record is pushed a few lines later and would
+  otherwise be its own best.
+- Rarity already returned null with one drafter and still does; there is nobody
+  to measure against.
+
+"Until everyone's out" reads "Until you are out" when solo, which is the mode
+worth playing — how far you get before three strikes.
+
 ## Service worker
 
 Fixed 2026-07-28. `sw.js` was cache-first for every same-origin GET, which
@@ -385,7 +414,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  455 assertions, no
+  485 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
