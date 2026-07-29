@@ -49,7 +49,8 @@ app.js                Game 100 — state, data loading, game engine, records
 game1620.js           162-0 — spin, draft, simulation
 sw.js                 service worker, offline caching
 manifest.webmanifest  PWA metadata
-icon.svg
+icon.svg              app icon, numerals drawn as shapes
+apple-touch-icon.png  180x180 raster of the same; the only icon iOS will use
 build_lists.py        regenerates data/ from the Lahman database
 tests/run.js          Game 100 suite, no dependencies, not shipped to the page
 tests/run1620.js      162-0 suite
@@ -364,6 +365,40 @@ one, and the only real work was stopping the records from lying about it.
 
 "Until everyone's out" reads "Until you are out" when solo, which is the mode
 worth playing — how far you get before three strikes.
+
+## The icon
+
+Replaced 2026-07-29. It was a gold **OB** — Off the Board, the name dropped on
+the 28th — and was the last thing still carrying the old brand. Now a gold
+`100` on the Monster green.
+
+Four things about it that look like fussiness and are not:
+
+- **The numerals are shapes, not text.** An app icon is rasterised by the OS,
+  which never loads a webfont and does not agree with the next OS about what
+  "Helvetica" is. The old icon asked for Helvetica and got whatever was nearest.
+- **Everything sits inside the middle 80%.** The manifest declares the icon
+  `maskable`, so Android crops it to a circle. The old 16px border sat squarely
+  in that crop zone and was being clipped.
+- **iOS needs the PNG.** It does not read the manifest for a home-screen tile
+  and will not accept an SVG for `apple-touch-icon`. Without
+  `apple-touch-icon.png` an iPhone puts a screenshot of the page on the home
+  screen. Regenerate it from the SVG with
+  `qlmanage -t -s 180 -o <dir> icon.svg` — no build step, macOS ships it. It
+  must stay fully opaque; iOS composites transparency onto black.
+- **It is deliberately not in the service worker's `FILES`.** That list goes
+  through `addAll`, which rejects as a whole if any one file 404s, and a failed
+  install costs offline play. A cosmetic file is not worth that risk; the
+  network-first shell handler caches it on first fetch anyway.
+
+`short_name` is `Game 100` — the only name a home screen ever shows, and the
+reason `name` can stay the full **A Game of Numbers**. iOS truncates a label at
+roughly twelve characters. Naming the collection after its flagship game is a
+known trade: 162-0 is not in the icon.
+
+**A phone caches the tile from the moment the app was added.** Changing the icon
+does nothing to an already-installed home-screen app until it is removed and
+re-added.
 
 ## Service worker
 

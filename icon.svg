@@ -1,6 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">A Game of Numbers</title>
+  <!-- The numerals are geometry, not type. An app icon is rasterised by the OS,
+       which never loads a webfont and does not agree with the next OS about what
+       "Helvetica" is - the old icon asked for Helvetica and got whatever was
+       nearest. Drawn as shapes it is identical everywhere.
+
+       Everything sits inside the middle 80%, because the manifest declares the
+       icon maskable and Android crops it to a circle. The old 16px border sat in
+       that crop zone and was being clipped. -->
   <rect width="512" height="512" fill="#1B3B2F"/>
-  <rect x="48" y="48" width="416" height="416" fill="none" stroke="#3D6353" stroke-width="16"/>
-  <text x="256" y="330" font-family="Helvetica,Arial,sans-serif" font-weight="bold"
-        font-size="240" fill="#E8B93B" text-anchor="middle">OB</text>
+  <g fill="#E8B93B">
+    <!-- 1 -->
+    <path d="M108 200 L140 168 L140 338" fill="none" stroke="#E8B93B"
+          stroke-width="28" stroke-linejoin="miter"/>
+    <rect x="96" y="324" width="88" height="28"/>
+    <!-- 0 0 -->
+    <rect x="212" y="160" width="88" height="192" rx="28"/>
+    <rect x="328" y="160" width="88" height="192" rx="28"/>
+  </g>
+  <g fill="#1B3B2F">
+    <rect x="240" y="188" width="32" height="136" rx="10"/>
+    <rect x="356" y="188" width="32" height="136" rx="10"/>
+  </g>
 </svg>

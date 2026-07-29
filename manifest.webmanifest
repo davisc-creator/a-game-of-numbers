@@ -1,11 +1,12 @@
 {
   "name": "A Game of Numbers",
-  "short_name": "Numbers",
+  "short_name": "Game 100",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#142C24",
   "theme_color": "#1B3B2F",
   "icons": [
-    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+    {"src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any"}
   ]
 }
