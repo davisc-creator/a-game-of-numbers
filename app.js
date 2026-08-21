@@ -4,13 +4,15 @@ const S = {
   manifest: null, data: null,
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
   seats: ['', ''], rounds: 12, G: null, recSort: 'ppg', teams: [], teamMode: 'all',
-  fmt: {on: false, mode: 'bo', n: 7, randCat: false, randEra: false},
+  fmt: {on: false, ws: false, mode: 'bo', n: 7, randCat: false, randEra: false},
   SR: null,
 };
 /* The scoring rule, and the only place it lives. Rank 1-100 scores its own
-   rank, 101-110 is the foul band, 111 and beyond is a strike - regardless of
-   how far down the list is actually ranked. */
-const SCORE_TO = 100, FOUL_TO = 110;
+   rank, 101-125 is the foul band, 126 and beyond is a strike - regardless of
+   how far down the list is actually ranked. Naming the number-one player on
+   the list earns a one-pick extension of the foul band to 140 (2026-07-29);
+   the band was 101-110 before that day. */
+const SCORE_TO = 100, FOUL_TO = 125, WIDE_TO = 140;
 const REC_KEY = 'offtheboard:records';
 let RECORDS = [];
 
@@ -135,24 +137,35 @@ function activeYears(){
   return r ? [r.y0, r.y1] : null;
 }
 
+/* Every tap on a range, a club or the season toggle starts a load, and a club
+   board can fetch thirty files, so two quick taps can finish out of order. The
+   sequence number lets a load that has been overtaken throw its result away
+   rather than install a board for a selection that no longer exists. */
+let loadSeq = 0;
 async function loadRange(){
+  const seq = ++loadSeq;
+  const stale = () => seq !== loadSeq;
   $('start-note').textContent = 'Loading\u2026';
   $('start').disabled = true;
   const yrs = activeYears();
   /* The near-miss chooser shows career spans, which only players.json carries.
      Non-fatal on purpose: without it the chooser still works, just names only. */
   try { await loadShared(); } catch(e){ /* spans stay unavailable */ }
+  let data;
   try{
-    S.data = S.teams.length && yrs
+    data = S.teams.length && yrs
       ? (S.teamMode === 'only'
           ? await buildTeamRange(yrs[0], yrs[1], S.post, S.teams)
           : await buildTeamMembers(yrs[0], yrs[1], S.post, S.teams))
       : await baseRange(S.post);
   }catch(e){
+    if (stale()) return;
     S.data = null;
     $('start-note').textContent = 'Could not load that era.';
     return;
   }
+  if (stale()) return;
+  S.data = data;
   if (!S.data){
     $('start-note').textContent = S.teams.length
       ? 'Those clubs have nothing rankable in that span. Widen the years or pick another club.'
@@ -687,8 +700,16 @@ function startGame(){
     label: pool.label, abbr: pool.abbr, pool,
     players: S.seats.map((n, i) => ({name: (n.trim() || `Drafter ${i+1}`),
       pts: 0, strikes: 0, out: false, picks: 0, fouls: 0, ranks: [], picked: [],
-      turns: 0, firstOk: 0, seq: ''})),
-    round: 0, pos: 0, maxRounds: S.rounds, log: [], misses: [], saved: false,
+      turns: 0, firstOk: 0, seq: '',
+      /* unused foul-band extensions, one per number-one player named */
+      wide: 0, wides: 0})),
+    /* A World Series game is one pick each, whatever the rounds setting says.
+       `first` rotates the opening pick through the seats from game to game
+       inside a series: in a one-pick game the second picker knows the number
+       to beat, so going first every time is a real handicap. */
+    round: 0, pos: 0, maxRounds: (S.SR && S.SR.ws) ? 1 : S.rounds,
+    first: (S.SR && !S.SR.done) ? S.SR.games.length % S.seats.length : 0,
+    log: [], misses: [], saved: false,
     /* attempts inside the current turn. A re-prompt - already taken, already
        missed, ambiguous, empty - does not end the turn, so it must not count
        against a first guess either. */
@@ -699,11 +720,14 @@ function startGame(){
   $('g-cat').textContent = pool.label;
   setPlate('On the clock', '\u2014',
     `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name a player`, '');
-  clearMsg(); renderGame(); focusGuess();
+  /* a chooser left open when the last game was quit lives inside the game
+     screen, so it would otherwise come back with this one and act on it */
+  clearMsg(); clearConfirm(); renderGame(); focusGuess();
 }
 
 const order = r => {
-  const a = [...Array(S.G.players.length).keys()];
+  const n = S.G.players.length, f = S.G.first || 0;
+  const a = [...Array(n).keys()].map(i => (i + f) % n);
   return r % 2 === 0 ? a : a.reverse();
 };
 const seat = () => order(S.G.round)[S.G.pos];
@@ -711,6 +735,10 @@ const alive = () => S.G.players.filter(p => !p.out).length;
 const openLeft = () => S.G.pool.board.filter(e => !e.drafted).length;
 
 function advance(){
+  /* picks hand off through a short timer; End game inside that window already
+     finished and saved this game, and finishing it again would land on the
+     plain results screen and drop a running series */
+  if (!S.G || S.G.saved) return;
   if (!alive() || !openLeft()) return finish();
   let guard = 0;
   do {
@@ -841,25 +869,34 @@ function score(e){
   p.picked.push({n: e.name, r: e.rank, i: e.id});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val, id: e.id});
   clearMsg();
+  /* Naming the number-one player is the one pick that pays nothing extra in
+     points - rank 1 is worth 1 - so it pays in rope instead: the foul band runs
+     to WIDE_TO for one of this person's later picks. Ties at the top all count;
+     two men level at rank 1 are both the best. */
+  const top = e.rank === 1;
+  if (top){ p.wide++; p.wides++; }
   setPlate(`${p.name} scores`, String(e.rank),
     `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
+  if (top) setMsg(`Number one. ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 280);
 }
 
-/* Foul ball: free at two strikes, otherwise it costs one. Turn ends either way. */
-function foul(f){
+/* Foul ball: free at two strikes, otherwise it costs one. Turn ends either way.
+   `wide` marks a pick that only fouled because of an earned extension. */
+function foul(f, wide){
   const p = S.G.players[seat()];
   f.used = true; f.missed = true; p.fouls++;
   p.turns++; p.seq += 'f';
-  S.G.misses.push({kind: 'foul', name: f.name, rank: f.rank, val: f.val, by: p.name});
+  S.G.misses.push({kind: 'foul', name: f.name, rank: f.rank, val: f.val, by: p.name, wide: !!wide});
   const free = p.strikes >= 2;
   if (!free) p.strikes++;
   clearMsg();
   setPlate('Foul ball', 'FOUL',
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
-  setMsg(free ? `Past the top ${SCORE_TO}, but at two strikes the foul is free. Turn passes.`
-              : `Past the top ${SCORE_TO} \u2014 ${SCORE_TO + 1} to ${FOUL_TO} is a foul. Strike ${p.strikes}. Turn passes.`,
+  const band = wide ? `${SCORE_TO + 1} to ${WIDE_TO} with the extension, now used` : `${SCORE_TO + 1} to ${FOUL_TO}`;
+  setMsg(free ? `Past the top ${SCORE_TO}, but at two strikes the foul is free${wide ? ' \u2014 extension used' : ''}. Turn passes.`
+              : `Past the top ${SCORE_TO} \u2014 ${band} is a foul. Strike ${p.strikes}. Turn passes.`,
          'warn');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 420);
@@ -868,6 +905,11 @@ function foul(f){
 /* A strike still tells you what the player actually did. */
 function strike(raw, e){
   const p = S.G.players[seat()];
+  /* an earned extension turns a near miss into a foul, once */
+  if (e && e.rank && e.rank > FOUL_TO && e.rank <= WIDE_TO && p.wide > 0){
+    p.wide--;
+    return foul(e, true);
+  }
   p.strikes++;
   p.turns++; p.seq += 's';
   if (e) e.missed = true;
@@ -907,14 +949,17 @@ function finish(){
     rec = {ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
       depth: G.pool.depth, y0: S.data && S.data.y0, y1: S.data && S.data.y1,
       teams: (S.data && S.data.teams) || null, solo,
-      misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by})),
+      misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by, ...(m.wide ? {w: true} : {})})),
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
-        turns: p.turns, firstOk: p.firstOk, seq: p.seq,
+        turns: p.turns, firstOk: p.firstOk, seq: p.seq, wides: p.wides,
         win: !solo && p.pts === best}))};
     /* the series fields ride along on an otherwise ordinary game record, so
        nothing that reads records has to know series exist */
-    if (S.SR){ rec.sid = S.SR.id; rec.sno = S.SR.games.length + 1; rec.smode = S.SR.mode; rec.sn = S.SR.n; }
+    if (S.SR){
+      rec.sid = S.SR.id; rec.sno = S.SR.games.length + 1; rec.smode = S.SR.mode; rec.sn = S.SR.n;
+      if (S.SR.ws) rec.sws = true;
+    }
     RECORDS.push(rec);
     saveRecords();
   }
@@ -944,15 +989,21 @@ function finish(){
 }
 
 /* Best this person has scored solo on this exact board before. Same category,
-   same range, same postseason flag - a different board is a different problem,
-   the same way streaks do not carry between games. Null when this is the first
-   attempt, so the screen can say nothing rather than compare against zero. */
+   same range, same postseason flag, same clubs - a different board is a
+   different problem, the same way streaks do not carry between games. The club
+   check matters because a club board records the league range's id plus the
+   clubs separately, so without it a Giants-only 300 was measured against a
+   whole-league 900. Null when this is the first attempt, so the screen can say
+   nothing rather than compare against zero. */
+const teamKey = t => (t && t.length) ? [...t].sort().join('+') : '';
 function soloPriorBest(G){
   if (!G || G.players.length !== 1) return null;
   const who = (G.players[0].name || '').trim().toLowerCase();
+  const mine = teamKey(S.data && S.data.teams);
   let best = null;
   for (const g of RECORDS){
     if (!g.solo || g.cat !== G.cat || g.range !== G.rangeId || !!g.post !== !!G.post) continue;
+    if (teamKey(g.teams) !== mine) continue;
     for (const p of (g.players || [])){
       if ((p.name || '').trim().toLowerCase() !== who) continue;
       if (best == null || (p.pts || 0) > best) best = p.pts || 0;
@@ -975,15 +1026,25 @@ const SMODES = {
 };
 const seriesTarget = sr => sr.mode === 'bo' ? Math.floor(sr.n / 2) + 1 : sr.n;
 
+/* The World Series is a best of seven where every game is a random era, a
+   random category and one pick each - whoever names the deeper player takes
+   the game. It is a preset over the ordinary series machinery rather than a
+   mode of its own, so everything that already works for a series (the tally,
+   draws, records, the standings screen) works for it untouched. */
+const WS = {n: 7, note: 'Best of seven. Every game is a random era and a random category, one pick each — the deeper player takes the game. First pick alternates.'};
+
 function seriesLabel(sr){
+  if (sr.ws) return 'World Series';
   const m = SMODES[sr.mode];
   return sr.mode === 'bo' ? `Best of ${sr.n}` : `${m.label} ${sr.n} ${m.unit}`;
 }
 
 function startSeries(){
+  const ws = !!(S.fmt.on && S.fmt.ws);
   S.SR = {
-    id: Date.now(), mode: S.fmt.mode, n: S.fmt.n,
-    randCat: S.fmt.randCat, randEra: S.fmt.randEra,
+    id: Date.now(), ws,
+    mode: ws ? 'bo' : S.fmt.mode, n: ws ? WS.n : S.fmt.n,
+    randCat: ws || S.fmt.randCat, randEra: ws || S.fmt.randEra,
     names: S.seats.map((n, i) => (n.trim() || `Drafter ${i + 1}`)),
     wins: {}, pts: {}, games: [], done: false,
   };
@@ -1009,7 +1070,18 @@ function seriesTake(rec){
 
   const target = seriesTarget(sr);
   const best = k => Math.max(0, ...Object.values(sr[k]));
-  if (sr.mode === 'points')      sr.done = best('pts') >= target;
+  /* A World Series has to produce a champion. One-pick games draw often - both
+     strike, or both land the same rank - so seven games can pass with nobody at
+     four. Past game seven it becomes sudden death: it ends the moment somebody
+     leads outright on wins, or at the same cap first-to-N-wins uses. */
+  const soleLeader = () => {
+    const w = Object.values(sr.wins);
+    return w.length > 0 && w.filter(x => x === best('wins')).length === 1;
+  };
+  if (sr.ws)                     sr.done = best('wins') >= target
+                                   || (sr.games.length >= sr.n && soleLeader())
+                                   || sr.games.length >= 99;
+  else if (sr.mode === 'points') sr.done = best('pts') >= target;
   else if (sr.mode === 'games')  sr.done = sr.games.length >= sr.n;
   else if (sr.mode === 'bo')     sr.done = best('wins') >= target || sr.games.length >= sr.n;
   /* first-to-N-wins has no natural end if every game is drawn, so it is capped;
@@ -1028,12 +1100,13 @@ function renderSeries(){
   const sr = S.SR, rows = seriesStanding(), target = seriesTarget(sr);
   const lead = rows[0], tied = rows.filter(r => r.wins === lead.wins && r.pts === lead.pts);
 
+  const no = sr.games.length + 1;
   $('ser-head').textContent = sr.done
-    ? (tied.length > 1 ? 'Series tied' : `${lead.name} takes the series`)
-    : `${seriesLabel(sr)} — game ${sr.games.length + 1}`;
+    ? (tied.length > 1 ? 'Series tied' : sr.ws ? `${lead.name} wins the World Series` : `${lead.name} takes the series`)
+    : `${seriesLabel(sr)} — game ${no}${sr.ws && no > sr.n ? ' · sudden death' : ''}`;
   $('ser-sub').textContent = sr.done
     ? `${sr.games.length} game${sr.games.length === 1 ? '' : 's'} played.`
-    : SMODES[sr.mode].note(sr.n);
+    : sr.ws ? WS.note : SMODES[sr.mode].note(sr.n);
 
   $('ser-table').innerHTML = rows.map((r, i) => `
     <div class="result-row ${i === 0 && sr.done ? 'win' : ''}">
@@ -1056,14 +1129,31 @@ function renderSeries(){
   $('ser-done').textContent = sr.done ? 'Done' : 'End series now';
 }
 
-/* Random era has to land on a range that actually exists for this season type. */
+/* A random era, drawn by kind first and then by range within the kind. The
+   manifest is 106 seasons, 11 decades and 7 spans, so a uniform draw over
+   ranges is a single season five times in six and a random series reads as
+   "1943 again". Has to land on a range that actually exists for this season
+   type - not every year has a postseason file. */
+function rollEra(post){
+  const pool = (S.manifest ? S.manifest.ranges : []).filter(r => post ? r.post : r.reg);
+  if (!pool.length) return null;
+  const kinds = [...new Set(pool.map(r => r.kind))];
+  const kind = kinds[Math.floor(Math.random() * kinds.length)];
+  const of = pool.filter(r => r.kind === kind);
+  return of[Math.floor(Math.random() * of.length)];
+}
+
 async function seriesNextGame(){
   const sr = S.SR;
   if (sr.randEra && S.manifest){
-    const pool = S.manifest.ranges.filter(r => S.post ? r.post : r.reg);
-    if (pool.length){
+    const r = rollEra(S.post);
+    if (r){
       S.custom = null;
-      S.rangeId = pool[Math.floor(Math.random() * pool.length)].id;
+      /* a club filter is kept for an ordinary random-era series - "the Giants,
+         random decade" is a fair game - but a World Series is the whole league,
+         and a club that did not exist in the rolled era would end it early */
+      if (sr.ws && S.teams.length){ S.teams = []; renderTeams(); }
+      S.rangeId = r.id;
       renderRanges();
       await loadRange();
     }
@@ -1085,7 +1175,8 @@ function renderSeriesHistory(){
   for (const g of RECORDS){
     if (!g.sid) continue;
     let e = by.get(g.sid);
-    if (!e){ e = {id: g.sid, mode: g.smode, n: g.sn, ts: g.ts, games: [], wins: {}, pts: {}}; by.set(g.sid, e); }
+    if (!e){ e = {id: g.sid, mode: g.smode, n: g.sn, ws: false, ts: g.ts, games: [], wins: {}, pts: {}}; by.set(g.sid, e); }
+    if (g.sws) e.ws = true;
     e.games.push(g);
     e.ts = Math.max(e.ts, g.ts);
     for (const p of (g.players || [])){
@@ -1099,7 +1190,7 @@ function renderSeriesHistory(){
   $('ser-history').innerHTML = list.map(e => {
     const rows = Object.keys(e.pts).map(n => ({name: n, wins: e.wins[n] || 0, pts: e.pts[n] || 0}))
       .sort((a, b) => b.wins - a.wins || b.pts - a.pts);
-    const label = e.mode === 'bo' ? `Best of ${e.n}`
+    const label = e.ws ? 'World Series' : e.mode === 'bo' ? `Best of ${e.n}`
       : `${(SMODES[e.mode] || {}).label || e.mode} ${e.n} ${(SMODES[e.mode] || {}).unit || ''}`.trim();
     const score = rows.map(r => `${esc(r.name)} ${e.mode === 'points' ? r.pts : r.wins}`).join('–');
     return `<div class="hist">
@@ -1119,7 +1210,17 @@ function renderGame(){
      and then get overwritten by the first pick, so mid-game there was no way to
      tell whether the man you just named was inside the list or past it. */
   $('g-depth').textContent = String(G.pool.depth);
-  $('g-round').textContent = G.maxRounds ? `${Math.min(G.round+1, G.maxRounds)}/${G.maxRounds}` : String(G.round+1);
+  /* in a one-pick World Series game the round counter would read 1/1 for ever;
+     which game of the seven this is tells the room far more */
+  const sr = S.SR;
+  if (sr && sr.ws){
+    const no = sr.games.length + 1;
+    $('g-round-lbl').textContent = 'Game';
+    $('g-round').textContent = no <= sr.n ? `${no}/${sr.n}` : String(no);
+  } else {
+    $('g-round-lbl').textContent = 'Round';
+    $('g-round').textContent = G.maxRounds ? `${Math.min(G.round+1, G.maxRounds)}/${G.maxRounds}` : String(G.round+1);
+  }
   $('g-left').textContent = openLeft();
   const t = seat();
   $('board').innerHTML = G.players.map((p, i) => `
@@ -1128,6 +1229,7 @@ function renderGame(){
       <div class="nm">${esc(p.name)}</div>
       <div class="pts">${p.pts}</div>
       <div class="strikes">${[0,1,2].map(s => `<i class="${s < p.strikes ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="wide-tag">${p.wide ? `foul to ${WIDE_TO}${p.wide > 1 ? ' ×' + p.wide : ''}` : ''}</div>
     </div>`).join('');
   $('log').innerHTML = [...G.log].sort((a,b) => a.rank - b.rank).map(r => `
     <div class="log-row">
@@ -1185,10 +1287,35 @@ function renderSeats(){
     ? 'Solo practice \u2014 no opponent, nothing to win, and the game is not counted as a win in your records. Pick "Until you are out" to keep going until three strikes.'
     : 'Use real names \u2014 records track people across games by name.';
   $('rounds-out').textContent = solo ? 'Until you are out' : "Until everyone's out";
-  $('start').textContent = solo ? 'Start solo practice' : 'Start draft';
   /* a series needs somebody to be ahead of */
   $('fmt-card').classList.toggle('hidden', solo);
   if (solo) S.fmt.on = false;
+  syncFormat();
+}
+
+/* The setup screen has to agree with S.fmt wherever it was changed from - the
+   format pills, the seat count, a finished series. A World Series needs no era,
+   category or rounds of its own, so those cards go; leaving them up invites
+   choosing something the roll is about to ignore. */
+function syncFormat(){
+  const press = (sel, on) => document.querySelectorAll(sel).forEach(x =>
+    x.setAttribute('aria-pressed', String(on(x))));
+  const solo = S.seats.length === 1;
+  const ws = S.fmt.on && S.fmt.ws && !solo;
+  const m = SMODES[S.fmt.mode];
+  $('s-n-label').textContent = m.unit === 'points' ? 'Points' : (S.fmt.mode === 'bo' ? 'Games' : m.unit === 'wins' ? 'Wins' : 'Games');
+  $('s-n-note').textContent = m.note(S.fmt.n);
+  $('series-opts').classList.toggle('hidden', !S.fmt.on || ws);
+  $('ws-note').classList.toggle('hidden', !ws);
+  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card'])
+    $(id).classList.toggle('hidden', ws);
+  press('#fmt-set .pill', x => x.dataset.fmt === (!S.fmt.on ? 'single' : S.fmt.ws ? 'ws' : 'series'));
+  press('#smode-set .pill', x => x.dataset.smode === S.fmt.mode);
+  press('#svary-set .pill', x => x.dataset.vary === 'cat' ? S.fmt.randCat : S.fmt.randEra);
+  $('start').textContent = solo ? 'Start solo practice' : ws ? 'Play the World Series' : 'Start draft';
+  /* the start button normally waits for a category to load; a World Series
+     brings its own, so it only needs the manifest */
+  if (ws) $('start').disabled = !S.manifest;
 }
 
 function renderRanges(){
@@ -1263,7 +1390,10 @@ function renderCats(){
 
 /* --------------------------------------------------------------- records */
 function loadRecords(){
-  try { RECORDS = JSON.parse(localStorage.getItem(REC_KEY) || '[]'); }
+  /* "null" and "{}" both parse cleanly and neither is iterable, and the first
+     thing to trip over that would be finish() - after the game, before the
+     record is written. Import already checks the shape; loading has to too. */
+  try { const v = JSON.parse(localStorage.getItem(REC_KEY) || '[]'); RECORDS = Array.isArray(v) ? v : []; }
   catch (e) { RECORDS = []; }
 }
 function saveRecords(){
@@ -1435,7 +1565,7 @@ function histPicks(g, p){
     rows.push('<div class="gm-pick"><span class="r">\u2014</span>nothing landed</div>');
   const mine = (g.misses || []).filter(m => m.by === p.name);
   rows.push(...mine.map(m =>
-    `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}</span></div>`));
+    `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}${m.w ? ' \u00b7 ' + WIDE_TO : ''}</span></div>`));
   if (!g.misses && (p.strikes || p.fouls))
     rows.push('<div class="gm-pick miss"><span class="r">\u2014</span>misses were not recorded in this game</div>');
   return rows.join('');
@@ -1648,6 +1778,7 @@ function diverge(h){
 function renderProfile(name){
   S.profName = name;
   const P = profileFor(name);
+  const key = name.trim().toLowerCase();
   $('prof-name').textContent = P.name;
   $('prof-top').innerHTML = [
     [P.games, 'games'], [P.wins, P.solo ? `wins · ${P.solo} solo` : 'wins'],
@@ -1774,8 +1905,8 @@ function renderProfile(name){
         ${g.picked.length ? g.picked.slice().sort((a,b) => a.r - b.r).map(pk =>
           `<div class="gm-pick"><span class="r">${pk.r}</span>${esc(pk.n)}</div>`).join('')
           : '<div class="gm-pick"><span class="r">\u2014</span>nothing landed</div>'}
-        ${(g.misses || []).filter(m => m.by === P.name).map(m =>
-          `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}</span></div>`).join('')}
+        ${(g.misses || []).filter(m => (m.by || '').trim().toLowerCase() === key).map(m =>
+          `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}${m.w ? ' \u00b7 ' + WIDE_TO : ''}</span></div>`).join('')}
       </div>
     </div>`).join('') : '<p class="hint">No games yet.</p>';
   $('prof-games').querySelectorAll('[data-game]').forEach(el => el.onclick = () => {
@@ -1894,44 +2025,42 @@ function wire(){
     document.querySelectorAll('#rounds-set .pill').forEach(x => x.setAttribute('aria-pressed','false'));
     el.setAttribute('aria-pressed','true');
   });
-  /* ---- format: single game or a series ---- */
-  const press = (sel, on) => document.querySelectorAll(sel).forEach(x =>
-    x.setAttribute('aria-pressed', String(on(x))));
-  const syncSeries = () => {
-    const m = SMODES[S.fmt.mode];
-    $('s-n-label').textContent = m.unit === 'points' ? 'Points' : (S.fmt.mode === 'bo' ? 'Games' : m.unit === 'wins' ? 'Wins' : 'Games');
-    $('s-n-note').textContent = m.note(S.fmt.n);
-    $('series-opts').classList.toggle('hidden', !S.fmt.on);
-    press('#fmt-set .pill', x => (x.dataset.fmt === 'series') === S.fmt.on);
-    press('#smode-set .pill', x => x.dataset.smode === S.fmt.mode);
-    press('#svary-set .pill', x => x.dataset.vary === 'cat' ? S.fmt.randCat : S.fmt.randEra);
-  };
+  /* ---- format: single game, a series, or the World Series ---- */
   document.querySelectorAll('#fmt-set .pill').forEach(el => el.onclick = () => {
-    S.fmt.on = el.dataset.fmt === 'series'; S.SR = null; syncSeries();
+    S.fmt.on = el.dataset.fmt !== 'single';
+    S.fmt.ws = el.dataset.fmt === 'ws';
+    S.SR = null; syncFormat();
   });
   document.querySelectorAll('#smode-set .pill').forEach(el => el.onclick = () => {
     S.fmt.mode = el.dataset.smode;
     /* a sane default for each mode, since 7 points is not a series */
     S.fmt.n = {bo: 7, wins: 3, points: 500, games: 5}[S.fmt.mode];
     $('s-n').value = S.fmt.n;
-    syncSeries();
+    syncFormat();
   });
   $('s-n').oninput = () => {
     const v = parseInt($('s-n').value, 10);
     if (Number.isInteger(v) && v > 0) S.fmt.n = v;
-    syncSeries();
+    syncFormat();
   };
   document.querySelectorAll('#svary-set .pill').forEach(el => el.onclick = () => {
     if (el.dataset.vary === 'cat') S.fmt.randCat = !S.fmt.randCat;
     else S.fmt.randEra = !S.fmt.randEra;
-    syncSeries();
+    syncFormat();
   });
-  syncSeries();
+  syncFormat();
 
   $('ser-next').onclick = () => seriesNextGame();
   $('ser-done').onclick = () => { S.SR = null; renderRecords(); show('records'); };
 
-  $('start').onclick  = () => { S.SR = null; startGame(); };
+  /* A World Series rolls its first era and category the same way it rolls the
+     rest, so it starts through the series path rather than with whatever the
+     setup screen happened to have selected. */
+  $('start').onclick  = () => {
+    S.SR = null;
+    if (S.fmt.on && S.fmt.ws){ startSeries(); return seriesNextGame(); }
+    startGame();
+  };
   $('submit').onclick = submitGuess;
   $('guess').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submitGuess(); } });
   $('quit').onclick = () => { if (S.G) finish(); };

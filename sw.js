@@ -32,7 +32,10 @@ self.addEventListener('fetch', e => {
   if (/\/data[^/]*\//.test(url.pathname)) {
     e.respondWith(
       caches.match(e.request).then(hit => (hit && hit.ok) ? hit
-        : fetch(e.request).then(res => keep(DATA, e.request, res)).catch(() => hit))
+        /* reaching the catch means any cached copy was already refused as
+           not-ok, so handing it back now would be the lie the check exists
+           to prevent */
+        : fetch(e.request).then(res => keep(DATA, e.request, res)).catch(() => undefined))
     );
     return;
   }

@@ -157,6 +157,14 @@ async function main(){
     const r = await sw.get(DATA_URL);
     eq(r.body, 'offline copy', 'a good cached data file still works with no network');
   }
+  {
+    /* but a poisoned one is not handed back just because the network is gone -
+       the first version of this fix did exactly that in its catch */
+    const sw = loadSW();
+    sw.seed('otb-data-v1', DATA_URL, res(404, 'stale not found'));
+    sw.setNet(() => Promise.reject(new Error('offline')));
+    eq(await sw.get(DATA_URL), undefined, 'offline, a poisoned data entry is not served either');
+  }
 
   group('the shell is network-first');
   {

@@ -73,6 +73,8 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .strikes{display:flex;gap:4px;margin-top:4px}
 .strikes i{width:13px;height:13px;border:1px solid var(--rule);display:block;border-radius:1px;font-style:normal}
 .strikes i.on{border-color:var(--out);background:var(--out)}
+.wide-tag{font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;
+  color:var(--pole);margin-top:4px;min-height:13px}
 .turn-tag{font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;color:var(--pole);margin-bottom:2px;height:14px}
 
 .plate{border:2px solid var(--rule);background:var(--slot);padding:16px;text-align:center;margin-bottom:14px}
@@ -89,6 +91,7 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .msg{font-size:16px;padding:10px 12px;border-left:3px solid var(--rule);background:rgba(0,0,0,.2);margin-bottom:12px}
 .msg.warn{border-left-color:var(--pole)}
 .msg.err{border-left-color:var(--out)}
+.msg.good{border-left-color:var(--pole);background:rgba(232,185,59,.12)}
 
 .log{border-top:1px solid var(--rule);margin-top:6px}
 .log-row{display:flex;align-items:baseline;gap:10px;padding:7px 2px;border-bottom:1px solid rgba(61,99,83,.45)}

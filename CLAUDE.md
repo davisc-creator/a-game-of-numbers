@@ -95,7 +95,7 @@ turn a column into a leaderboard.
 
 `rows[i][0]` is the player name; the rest align with `cols`. `buildPool()` in
 app.js sorts a column, assigns competition ranks, cuts at `depth`, takes the
-next ten as the foul band, and indexes everyone else for lookup.
+next twenty-five as the foul band, and indexes everyone else for lookup.
 
 Every side also carries `ids`: the player id for each row, drawn from
 `players.json`. It exists so a custom range can add a player's seasons together
@@ -118,15 +118,26 @@ value and rank, which needs every player, not just the ranked ones.
 - Snake draft, 1–4 players, pass-and-play on one device. One is solo practice —
   see below.
 - **Rank 1–100 scores its own rank.** Rank 87 is worth 87 points.
-- **Rank 101–110 is the foul band.** Costs a strike below two, free at two.
-  Either way the turn ends; each of the ten only works once.
-- **Rank 111 and beyond is a strike**, however good the player was. He is still
+- **Rank 101–125 is the foul band.** Costs a strike below two, free at two.
+  Either way the turn ends; each of the twenty-five only works once. *Widened
+  from 101–110 on 2026-07-29 at the owner's direction.*
+- **Naming the number-one player earns a one-pick extension of the foul band to
+  140** (`WIDE_TO`). Rank 1 is worth one point, the least on the board, so it
+  pays in rope instead. It is per person, counted in `p.wide`, spent by the
+  first pick that lands in 126–140 (which then fouls instead of striking, and
+  burns the man named like any foul), and shown on the seat panel until spent.
+  Ties at rank 1 all count — two men level at the top are both the best. A pick
+  at 141 or beyond is a strike with or without it, and does not consume it. The
+  miss record carries `w: true` so the per-game views can say which foul it
+  was; `wides` on the player record counts how many were earned.
+- **Rank 126 and beyond is a strike**, however good the player was. He is still
   in the pool and still reported — "he was 153rd" — because seeing how far off
   you were is the point. He simply cannot be drafted and cannot score.
 - The cut is by **rank, not list position**, because ties share a rank. Sixty
   men tied at 50 all score 50; the hundredth of them does not fall into the
-  fouls. `SCORE_TO` and `FOUL_TO` at the top of app.js are the only place this
-  lives.
+  fouls. `SCORE_TO`, `FOUL_TO` and `WIDE_TO` at the top of app.js are the only
+  place this lives. The rules screen in index.html states all three; keep it in
+  step.
 - Drafted players leave the shared pool for everyone.
 - **Ties share a rank.** Two players with equal totals score the same.
 - **A strike still reports the truth** — the player's actual value and rank, or
@@ -261,6 +272,12 @@ The **Custom** tab takes any span from 1920 to 2025 and aggregates it in the
 browser out of the season files. Precomputing them was never an option: 1920 to
 2025 contains 5,671 distinct ranges.
 
+`loadRange` carries a sequence number. Every tap on a range, a club or the
+season toggle starts a load and a club board can fetch thirty files, so two
+quick taps finished out of order and the earlier selection's board got
+installed under the later selection's label. A load that has been overtaken
+throws its result away.
+
 `buildCustom()` in app.js is a deliberate reimplementation of `build()` in
 `build_lists.py` — the same era gates, the same all-zero row drop, the same
 derived columns, the same ERA− against the range's own league context, the same
@@ -298,6 +315,9 @@ Two things to preserve when touching this:
   have `ranks`. `profileFor()` handles both — keep it that way.
 - **Export/import merges by `ts`.** Re-importing the same file is harmless.
   Do not switch to index-based merging.
+- **Loading checks the shape.** `"null"` and `"{}"` both parse and neither is
+  iterable; the first thing to trip over that would be `finish()` — after the
+  game, before the record is written. A non-array loads as empty.
 
 **Past games open in place on the Records screen.** `#hist-list` used to render
 each game as an inert `<div>` — it looked tappable and did nothing, and the
@@ -330,6 +350,34 @@ carry on working without knowing series exist. The suite asserts that.
 Four formats, in `SMODES`: best of N, first to N wins, first to N points
 (cumulative across games), and a fixed number of games. Either or both of the
 era and the category can be re-rolled between games.
+
+**A random era is drawn by kind first** (`rollEra`): the manifest is 106
+seasons, 11 decades and 7 spans, so a uniform draw over ranges is a single
+season five times in six and a random series reads as "1943 again". Kind is
+chosen uniformly, then a range within the kind. The suite asserts all three
+kinds come up and that spans and decades are not rare.
+
+**The opening pick rotates** through the seats from game to game inside any
+series (`S.G.first`, consumed by `order`). In a multi-round snake it is merely
+fair; in a one-pick game it is essential, because the second picker knows the
+number to beat.
+
+**The World Series** is a preset over this machinery, not a mode of its own:
+`S.fmt.ws` sets best of seven with both re-rolls on, and `S.SR.ws` makes every
+game one round (`maxRounds` 1, whatever the rounds setting says). Whoever names
+the deeper player takes the game. It starts through `seriesNextGame` so game
+one is rolled like the rest rather than using whatever the setup screen had
+selected, and the setup screen hides the era, club, category and rounds cards
+while it is chosen because none of them apply. A club filter is cleared for it
+— a club that did not exist in the rolled era would end the series early —
+while an ordinary random-era series keeps its clubs, since "the Giants, random
+decade" is a fair game.
+
+It has its own end rule because one-pick games draw often (both strike, or the
+same rank): four wins ends it, or seven games with an outright leader on wins;
+level after seven is sudden death until somebody leads outright, capped at 99
+like first-to-N-wins. A shared title was the alternative and is not a World
+Series. Records carry `sws: true`; the series history labels them.
 
 **A drawn game advances nobody.** The record's own `win` flag marks every top
 scorer, which is right for career stats — but crediting both in a series let a
@@ -461,7 +509,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  499 assertions, no
+  570 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -491,6 +539,24 @@ complete; the average was 15.1 spins for 15 slots.
 The card grid filters by side, by any position the club actually has, and by
 "fits an open slot", which is the one that matters late in a draft. Filters that
 would show an empty grid are not offered.
+
+Three things fixed on 2026-07-29 after a review, each with a test that fails
+on the old code:
+
+- **The snake was wrong with more than one drafter.** `nextTurn` wrote the seat
+  it had mapped to back into the position counter, so every backward round was
+  one pick long and the last seat drew twice as often as anyone — 6 of 12 picks
+  with three drafters. `G.pos` is the position in the round and `G.turn` the
+  seat it maps to, and they stay apart.
+- **A drafted player is gone for everyone.** The spin rebuilds its cards from
+  the season files each time, so `taken()` has to strip every man already on a
+  roster, or one player could be drafted twice — by two seats or into two slots.
+- **A paid respin lands somewhere else.** The candidate list now excludes the
+  club-and-window showing; for a club with a single window the respin widens to
+  any club rather than costing a respin for nothing.
+
+Abandoning a draft sets `G.done`, so `isDirty()` stops asking about a draft
+the player already threw away.
 
 **Era normalization is the whole game.** League batting average was .296 in 1930
 and .237 in 1968. On raw numbers every optimal roster is a 1930s roster and the

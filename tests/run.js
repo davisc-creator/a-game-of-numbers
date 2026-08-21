@@ -90,13 +90,15 @@ function loadApp(){
    teamMembers, teamsInRange, loadTeamIndex, TX, PX, loadBreakdowns, recYears,
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
-   soloPriorBest, renderSeats, renderRecords, histPicks,
+   soloPriorBest, renderSeats, renderRecords, histPicks, syncFormat, rollEra, WS,
+   SCORE_TO, FOUL_TO, WIDE_TO, loadRecords, loadRange,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
   const api = vm.runInNewContext(src + epilogue, sandbox, {filename: 'app.js'});
   api.__timers = timers;
   api.__drain = () => { let n = 0; while (timers.length && n++ < 500) timers.shift()(); };
   api.__els = els;
+  api.__store = store;
   return api;
 }
 
@@ -110,8 +112,10 @@ const fill = (n, from) => Array.from({length: n}, (_, i) => [`Filler ${alpha(fro
 const FIX = () => withIds({
   id: 'test', label: 'Test Era', y0: 2000, y1: 2001, post: false,
   sides: {
-    /* 130 deep, so the 1-100 / 101-110 / 111+ boundaries are all exercised.
-       The named men sit at fixed ranks; fillers occupy everything between. */
+    /* 150 deep, so every boundary is exercised: 1-100 scores, 101-125 is the
+       foul band, 126-140 is only a foul with an earned extension, 141+ is a
+       strike no matter what. The named men sit at fixed ranks; fillers occupy
+       everything between. */
     bat: {
       cols: ['H', 'HR'],
       rows: [
@@ -123,8 +127,9 @@ const FIX = () => withIds({
         ['Bobby Bonds',  995, 0],   // rank 6, shared last name, zero HR
         ...fill(94, 994),           // ranks 7-100
         ['Jose Ramirez', 900, 0],   // rank 101, first of the foul band
-        ...fill(9, 899),            // ranks 102-110, rest of the foul band
-        ...fill(20, 890),           // ranks 111-130, strike territory
+        ...fill(24, 899),           // ranks 102-125, rest of the foul band
+        ...fill(15, 875),           // ranks 126-140, the extension zone
+        ...fill(10, 860),           // ranks 141-150, a strike however you cut it
       ],
     },
     pit: {cols: ['ERAm'], rows: [['Pedro Martinez', 80], ['Greg Maddux', 90], ['Roger Clemens', 100]]},
@@ -149,7 +154,7 @@ const FIX = () => withIds({
   },
   cats: {
     bat_h:   {side: 'bat', col: 'H',    label: 'Hits',      abbr: 'H',    depth: 3, dir: 'desc'},
-    bat_h6:  {side: 'bat', col: 'H',    label: 'Hits Deep', abbr: 'H',    depth: 130, dir: 'desc'},
+    bat_h6:  {side: 'bat', col: 'H',    label: 'Hits Deep', abbr: 'H',    depth: 150, dir: 'desc'},
     bat_hr:  {side: 'bat', col: 'HR',   label: 'Home Runs', abbr: 'HR',   depth: 3, dir: 'desc'},
     pit_em:  {side: 'pit', col: 'ERAm', label: 'ERA-',      abbr: 'ERA-', depth: 2, dir: 'asc'},
     dup_h:   {side: 'dup', col: 'H',    label: 'Dup Hits',  abbr: 'H',    depth: 7, dir: 'desc'},
@@ -181,6 +186,9 @@ function gameOn(app, catId, names){
   app.S.post = false;
   app.S.seats = names;
   app.S.rounds = 12;
+  /* a series left over from an earlier group would rotate the opening pick
+     and force one-pick games; every ordinary game starts from a clean slate */
+  app.S.SR = null; app.S.fmt.on = false; app.S.fmt.ws = false;
   app.startGame();
   app.__drain();
   return app.S.G;
@@ -219,14 +227,14 @@ group('buildPool');
   eq(P.board.map(e => e.rank).slice(0, 3), [1, 1, 3], 'ties share a rank, next rank skips');
   eq(P.board.map(e => e.name).slice(0, 3), ['Babe Ruth', 'Lou Gehrig', 'Hank Aaron'], 'board leads with the best');
   eq(P.depth, 100, 'only the top 100 score');
-  eq(P.foulTo, 110, 'and 101-110 is the foul band');
+  eq(P.foulTo, 125, 'and 101-125 is the foul band');
   eq(P.board.length, 100, 'the board holds exactly those 100');
   eq(P.board[P.board.length - 1].rank, 100, 'ending at rank 100');
-  eq(P.foul.length, 10, 'ten in the foul band');
-  eq(P.foul.map(e => e.rank), [101, 102, 103, 104, 105, 106, 107, 108, 109, 110], 'ranks 101 to 110');
-  eq(P.total, 130, 'total counts everyone with a value');
+  eq(P.foul.length, 25, 'twenty-five in the foul band');
+  eq(P.foul.map(e => e.rank), Array.from({length: 25}, (_, i) => 101 + i), 'ranks 101 to 125');
+  eq(P.total, 150, 'total counts everyone with a value');
   ok(P.board.every(e => e.rank <= 100), 'nothing past 100 can score');
-  ok(P.foul.every(e => e.rank > 100 && e.rank <= 110), 'nothing inside 100 is a foul');
+  ok(P.foul.every(e => e.rank > 100 && e.rank <= 125), 'nothing inside 100 is a foul');
   ok(P.board.every(e => !e.drafted), 'board starts undrafted');
   ok(P.foul.every(e => !e.used), 'foul band starts unused');
 }
@@ -253,13 +261,13 @@ group('buildPool');
   const shallow = poolFor(app, 'bat_h'), deep = poolFor(app, 'bat_h6');
   eq(shallow.board.length, deep.board.length, 'list depth does not change the cut');
   eq(shallow.foul.map(e => e.rank), deep.foul.map(e => e.rank), 'nor the foul band');
-  eq(deep.listDepth, 130, 'the list depth is still carried, for reporting a miss');
+  eq(deep.listDepth, 150, 'the list depth is still carried, for reporting a miss');
 
-  /* rank 111 and beyond is off the board even though it is in the data */
-  const past = deep.byName.get(('Filler ' + alpha(880)).toLowerCase());
-  ok(past && past[0].zone === 'off', 'rank 111+ sits off the board');
-  eq(past && past[0].rank, 121, 'but keeps its real rank so a strike can report it');
-  eq(past && past[0].val, 880, 'and its real value');
+  /* rank 126 and beyond is off the board even though it is in the data */
+  const past = deep.byName.get(('Filler ' + alpha(865)).toLowerCase());
+  ok(past && past[0].zone === 'off', 'rank 126+ sits off the board');
+  eq(past && past[0].rank, 136, 'but keeps its real rank so a strike can report it');
+  eq(past && past[0].val, 865, 'and its real value');
 }
 
 group('resolve');
@@ -395,7 +403,7 @@ group('the cut is always on screen');
   for (const cat of ['bat_h', 'bat_h6', 'bat_hr', 'dup_h']){
     const P = poolFor(app, cat);
     ok(P.board.every(e => e.rank <= 100), `${cat}: nothing past 100 scores`);
-    ok(P.foul.every(e => e.rank > 100 && e.rank <= 110), `${cat}: the foul band is 101-110`);
+    ok(P.foul.every(e => e.rank > 100 && e.rank <= 125), `${cat}: the foul band is 101-125`);
   }
 }
 
@@ -514,8 +522,7 @@ group('misses are out of play');
   eq(G.players.map(p => p.strikes), before, 'nobody is charged for it');
 
   /* a struck-out player is burned the same way */
-  const deep = G.pool.byName.get(app.norm('Filler ' + 'Zz'.slice(0,0) + alpha(880)))
-            || G.pool.byName.get(('Filler ' + alpha(880)).toLowerCase());
+  const deep = G.pool.byName.get(('Filler ' + alpha(865)).toLowerCase());
   const off = deep && deep[0];
   ok(off && off.zone === 'off', 'found an off-board player to strike on');
   app.strike('x', off); app.__drain();
@@ -1015,6 +1022,236 @@ group('solo practice');
   ok(true, 'and two drafters render without complaint');
 }
 
+group('the foul band and the earned extension');
+{
+  eq([app.SCORE_TO, app.FOUL_TO, app.WIDE_TO], [100, 125, 140], 'the cut is 100, fouls run to 125, the extension to 140');
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  const at = r => G.pool.all.find(e => e.rank === r);
+  ok(at(126) && at(126).zone === 'off' && at(140).zone === 'off' && at(141).zone === 'off',
+     '126, 140 and 141 all sit off the board');
+  ok(at(125).zone === 'foul', 'and 125 is the last foul');
+
+  /* nobody has an extension yet: 130 is a plain strike */
+  app.strike('x', at(130)); app.__drain();
+  eq(G.players[0].strikes, 1, 'without an extension 130 is a strike');
+  eq(G.players[0].wide, 0, 'and nothing was earned');
+
+  /* B names a number one - Ruth and Gehrig tie at rank 1, and both count */
+  app.S.G.pos = 1; app.S.G.round = 0;
+  app.score(G.pool.board.find(e => e.name === 'Lou Gehrig')); app.__drain();
+  const B = G.players[1];
+  eq(B.wide, 1, 'naming a number-one player earns one extension');
+  eq(B.wides, 1, 'and it is counted for the record');
+  ok(/foul to 140/.test(app.__els.get('board').innerHTML), 'the seat panel shows it');
+
+  /* B spends it: 135 is a foul rather than a strike, and the turn still ends */
+  app.S.G.pos = 1; app.S.G.round = 0;
+  const s0 = B.strikes, f0 = B.fouls, t0 = B.turns;
+  app.strike('x', at(135)); app.__drain();
+  eq([B.strikes - s0, B.fouls - f0, B.turns - t0], [1, 1, 1], 'a pick at 135 with an extension is a foul: one strike, one foul, turn over');
+  eq(B.wide, 0, 'and the extension is used up');
+  ok(at(135).missed, 'the man named is burned like any foul');
+  const last = app.S.G.misses[app.S.G.misses.length - 1];
+  eq([last.kind, last.wide], ['foul', true], 'and the miss says it was the extension that saved it');
+
+  /* spent: the next 135 is a strike again, and 141 never fouls */
+  app.S.G.pos = 1; app.S.G.round = 0;
+  app.strike('x', at(136)); app.__drain();
+  eq(B.strikes - s0, 2, 'with the extension gone 136 is a strike');
+  B.wide = 1;
+  app.S.G.pos = 1; app.S.G.round = 0;
+  const s1 = B.strikes;
+  app.strike('x', at(145)); app.__drain();
+  eq(B.strikes - s1, 1, '145 is a strike even with an extension in hand');
+  eq(B.wide, 1, 'and does not consume it');
+
+  /* a foul at two strikes is free; an extended one is too */
+  const G2 = gameOn(app, 'bat_h6', ['A']);
+  const p = G2.players[0];
+  p.strikes = 2; p.wide = 1;
+  app.strike('x', G2.pool.all.find(e => e.rank === 130)); app.__drain();
+  eq(p.strikes, 2, 'an extended foul at two strikes is free, like any foul');
+  ok(!p.out, 'so the player is still in');
+}
+{
+  /* the record carries the count, and an old record without it reads as zero */
+  app.setRecords([]);
+  const G = gameOn(app, 'bat_h6', ['A']);
+  app.score(G.pool.board.find(e => e.name === 'Babe Ruth')); app.__drain();
+  app.finish();
+  eq(app.getRecords()[0].players[0].wides, 1, 'the record says how many number ones were named');
+  const P = app.profileFor('A');
+  ok(Number.isFinite(P.pts), 'and the profile still computes');
+}
+
+group('World Series');
+{
+  app.S.seats = ['A', 'B'];
+  app.S.fmt = {on: true, ws: true, mode: 'points', n: 500, randCat: false, randEra: false};
+  app.startSeries();
+  const sr = app.S.SR;
+  ok(sr.ws, 'the series is marked as a World Series');
+  eq([sr.mode, sr.n], ['bo', 7], 'and is a best of seven whatever the series controls said');
+  ok(sr.randCat && sr.randEra, 'with a random era and category every game');
+  eq(app.seriesLabel(sr), 'World Series', 'labelled as such');
+
+  /* a game inside it is one pick each, and the opening pick rotates */
+  app.S.data = FIX(); app.S.catId = 'bat_h6'; app.S.rangeId = 'test'; app.S.post = false; app.S.rounds = 12;
+  app.startGame(); app.__drain();
+  let G = app.S.G;
+  eq(G.maxRounds, 1, 'a World Series game is one round, ignoring the rounds setting');
+  eq(G.first, 0, 'A opens game one');
+  eq(app.order(0), [0, 1], 'so the order is A then B');
+  eq(app.__els.get('g-round-lbl').textContent, 'Game', 'the header counts games, not rounds');
+  eq(app.__els.get('g-round').textContent, '1/7', 'and says which of the seven this is');
+  app.score(G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();
+  ok(!G.saved, 'after A picks the game is still on');
+  app.score(G.pool.board.find(e => e.name === 'Willie Mays')); app.__drain();
+  ok(G.saved, 'after B picks it is over - one pick each');
+  const rec = app.getRecords()[app.getRecords().length - 1];
+  ok(rec.sws && rec.sid === sr.id, 'the record carries the World Series flag and the series id');
+  eq(sr.games.length, 1, 'and the series took the game');
+  eq(sr.games[0].scores.find(x => x.name === 'B').win, true, 'B took game one with the deeper pick');
+
+  app.S.data = FIX(); app.startGame(); app.__drain();
+  G = app.S.G;
+  eq(G.first, 1, 'B opens game two');
+  eq(app.order(0), [1, 0], 'so the order flips');
+  eq(app.__els.get('g-round').textContent, '2/7', 'game two of seven');
+}
+{
+  /* the end rule: four wins ends it; seven games with an outright leader ends
+     it; level after seven goes to sudden death rather than a shared title */
+  const rec = (ts, a, b) => ({ts, range: '2024', cat: 'bat_h', label: 'Hits', post: false,
+    players: [{name: 'A', pts: a, picks: 1, strikes: 0, fouls: 0, ranks: [a], win: a >= b},
+              {name: 'B', pts: b, picks: 1, strikes: 0, fouls: 0, ranks: [b], win: b >= a}]});
+  const run = games => {
+    app.S.seats = ['A', 'B'];
+    app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, randCat: true, randEra: true};
+    app.startSeries();
+    let done = false, played = 0;
+    for (const [a, b] of games){ if (done) break; done = app.seriesTake(rec(2000 + played, a, b)); played++; }
+    return {done, played, standing: app.seriesStanding()};
+  };
+  let r = run([[10,1],[10,1],[10,1],[10,1],[10,1]]);
+  ok(r.done && r.played === 4, 'four wins ends a World Series');
+  r = run([[10,1],[1,10],[10,1],[1,10],[10,1],[1,10],[10,1]]);
+  ok(r.done && r.played === 7 && r.standing[0].name === 'A', 'game seven decides a 3-3 series');
+  r = run([[10,1],[1,10],[10,1],[1,10],[10,1],[1,10],[5,5],[5,5],[1,10]]);
+  ok(!r.done || r.played > 7, 'level after seven is not the end');
+  eq(r.played, 9, 'it goes to sudden death until somebody wins a game');
+  eq(r.standing[0].name, 'B', 'and the one who does takes it');
+  r = run([[10,1],[5,5],[5,5],[5,5],[5,5],[5,5],[5,5]]);
+  ok(r.done && r.played === 7 && r.standing[0].name === 'A', 'one win and six draws is still an outright lead after seven');
+  app.S.SR = null; app.S.fmt = {on: false, ws: false, mode: 'bo', n: 7, randCat: false, randEra: false};
+}
+{
+  /* the era roll is balanced by kind, or five games in six are a single season */
+  app.S.manifest = JSON.parse(fs.readFileSync(path.join(DATA, 'manifest.json'), 'utf8'));
+  const kinds = new Map();
+  for (let i = 0; i < 300; i++){ const r = app.rollEra(false); kinds.set(r.kind, (kinds.get(r.kind) || 0) + 1); }
+  eq([...kinds.keys()].sort(), ['decade', 'season', 'span'], 'every kind of range comes up');
+  ok(kinds.get('span') > 40 && kinds.get('decade') > 40,
+     `spans (${kinds.get('span')}) and decades (${kinds.get('decade')}) come up about as often as seasons (${kinds.get('season')}), not one time in eighteen`);
+  ok([...Array(50)].every(() => app.rollEra(true).post), 'a postseason roll only lands on ranges with a postseason file');
+}
+{
+  /* the setup screen: a World Series needs no era, category or rounds of its own */
+  app.S.seats = ['A', 'B'];
+  app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, randCat: false, randEra: false};
+  const hidden = new Map();
+  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card', 'series-opts', 'ws-note'])
+    app.__els.get(id).classList.toggle = (c, on) => hidden.set(id, on);
+  app.syncFormat();
+  ok(['era-card', 'team-card', 'cat-card', 'rounds-card'].every(id => hidden.get(id) === true), 'the era, club, category and rounds cards are hidden');
+  eq(hidden.get('ws-note'), false, 'and the World Series note is shown');
+  eq(app.__els.get('start').textContent, 'Play the World Series', 'the start button says what it starts');
+  app.S.seats = ['A'];
+  app.syncFormat();
+  ok(['era-card', 'cat-card'].every(id => hidden.get(id) === false), 'one drafter cannot play a World Series, so the cards come back');
+  app.S.seats = ['A', 'B']; app.S.fmt = {on: false, ws: false, mode: 'bo', n: 7, randCat: false, randEra: false};
+  app.syncFormat();
+  eq(app.__els.get('start').textContent, 'Start draft', 'and a single game reads as before');
+}
+
+group('review fixes');
+{
+  /* a chooser left open when a game is quit must not act on the next game */
+  const G = gameOn(app, 'bat_h6', ['A', 'B']);
+  app.askCandidates([G.pool.board.find(e => e.name === 'Hank Aaron')], 'hank aron');
+  ok(app.__els.get('confirm-slot').innerHTML.length > 0, 'a chooser is open');
+  app.finish();
+  gameOn(app, 'bat_hr', ['A', 'B']);
+  eq(app.__els.get('confirm-slot').innerHTML, '', 'and a new game starts without it');
+}
+{
+  /* End game inside the hand-off timer used to finish the game twice */
+  app.S.seats = ['A', 'B'];
+  app.S.fmt = {on: true, ws: false, mode: 'bo', n: 3, randCat: false, randEra: false};
+  app.startSeries();
+  app.S.data = FIX(); app.S.catId = 'bat_h6'; app.S.rangeId = 'test'; app.S.post = false; app.S.rounds = 1;
+  app.startGame(); app.__drain();
+  const G = app.S.G;
+  /* watch which screen is on top: the bug landed on the plain results screen
+     instead of the series standings, and Play again there drops the series */
+  let shown = null;
+  for (const sc of ['over', 'series'])
+    app.__els.get('screen-' + sc).classList.toggle = (c, hide) => { if (!hide) shown = sc; };
+  app.score(G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();   // A's pick, handed off
+  app.score(G.pool.board.find(e => e.name === 'Willie Mays'));                 // B's pick: the last of the round, timer queued
+  app.finish();                                                                // End game lands inside the timer
+  eq(shown, 'series', 'End game in a series goes to the standings');
+  const games = app.S.SR.games.length;
+  app.__drain();                                                         // the queued advance fires
+  eq(shown, 'series', 'and the late hand-off does not bounce it to the single-game results');
+  eq(app.S.SR.games.length, games, 'nor finish the game a second time');
+  ok(app.S.SR && !app.S.SR.done, 'and the series is still standing');
+  for (const sc of ['over', 'series']) app.__els.get('screen-' + sc).classList.toggle = () => {};
+  app.S.SR = null; app.S.fmt.on = false; app.S.rounds = 12;
+}
+{
+  /* a stored value that parses but is not an array */
+  const store = app.__store;
+  store.set('offtheboard:records', '{"not":"an array"}');
+  app.loadRecords();
+  eq(app.getRecords(), [], 'a non-array under the records key loads as empty');
+  store.set('offtheboard:records', 'null');
+  app.loadRecords();
+  eq(app.getRecords(), [], 'and so does null');
+  store.delete('offtheboard:records');
+}
+{
+  /* a solo best is per board, and a club board is a different board */
+  app.setRecords([
+    {ts: 1, solo: true, range: '2000-2025', post: false, cat: 'bat_h', teams: null,
+     players: [{name: 'Solo', pts: 900, picks: 9, strikes: 3, fouls: 0, ranks: [], picked: [], win: false}]},
+    {ts: 2, solo: true, range: '2000-2025', post: false, cat: 'bat_h', teams: ['SFG'],
+     players: [{name: 'Solo', pts: 300, picks: 3, strikes: 3, fouls: 0, ranks: [], picked: [], win: false}]},
+  ]);
+  const G = {players: [{name: 'Solo'}], cat: 'bat_h', rangeId: '2000-2025', post: false};
+  app.S.data = {teams: ['SFG']};
+  eq(app.soloPriorBest(G), 300, 'on the Giants board the best is the Giants score');
+  app.S.data = {teams: null};
+  eq(app.soloPriorBest(G), 900, 'on the league board it is the league score');
+  app.S.data = {teams: ['SFG', 'LAD']};
+  eq(app.soloPriorBest(G), null, 'and a two-club board has no history yet');
+}
+{
+  /* the profile merges a name regardless of case; its misses have to as well */
+  app.setRecords([
+    {ts: 5, range: '2024', y0: 2024, y1: 2024, cat: 'bat_h', label: 'Hits', post: false,
+     misses: [{n: 'Dud', r: 400, k: 'strike', by: 'carson'}],
+     players: [{name: 'carson', pts: 10, picks: 1, strikes: 1, fouls: 0, ranks: [10], picked: [{n: 'A', r: 10}], win: true}]},
+    {ts: 6, range: '2024', y0: 2024, y1: 2024, cat: 'bat_h', label: 'Hits', post: false,
+     misses: [{n: 'Flub', r: 500, k: 'strike', by: 'Carson'}],
+     players: [{name: 'Carson', pts: 20, picks: 1, strikes: 1, fouls: 0, ranks: [20], picked: [{n: 'B', r: 20}], win: true}]},
+  ]);
+  app.PX.played = {y: {}, f: {}}; app.PX.ok = true;
+  app.renderProfile('Carson');
+  const html = app.__els.get('prof-games').innerHTML;
+  ok(/Dud/.test(html) && /Flub/.test(html), 'misses from both spellings of the name show on the profile');
+}
+
 group('an empty breakdown says which kind of empty');
 {
   /* picks recorded before the app stored a player id cannot be placed in a
@@ -1147,7 +1384,7 @@ group('buildPool over every shipped category');
       built++;
       if (!P.board.length) bad.push(`${f} ${id} empty board`);
       if (P.board.some(e => e.rank > 100)) bad.push(`${f} ${id} a board player ranked past 100`);
-      if (P.foul.some(e => e.rank <= 100 || e.rank > 110)) bad.push(`${f} ${id} foul band outside 101-110`);
+      if (P.foul.some(e => e.rank <= 100 || e.rank > 125)) bad.push(`${f} ${id} foul band outside 101-125`);
       const asc = d.cats[id].dir === 'asc';
       for (let i = 1; i < P.board.length; i++){
         if (P.board[i].rank < P.board[i - 1].rank) bad.push(`${f} ${id} ranks not monotonic`);

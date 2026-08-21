@@ -45,7 +45,7 @@
       <p class="hint" id="seat-note">Use real names &mdash; records track people across games by name.</p>
     </div>
 
-    <div class="card">
+    <div class="card" id="era-card">
       <h2>Era</h2>
       <div class="pill-set" id="kind-set">
         <button class="pill" data-kind="span" aria-pressed="true">Spans</button>
@@ -75,7 +75,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="team-card">
       <h2>Teams</h2>
       <div class="pill-set" id="team-mode">
         <button class="pill" data-tm="all" aria-pressed="true">All of baseball</button>
@@ -89,7 +89,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="cat-card">
       <h2>Category</h2>
       <div class="grp-label">Batting</div>
       <div class="pill-set" id="cats-bat"></div>
@@ -104,7 +104,9 @@
       <div class="pill-set" id="fmt-set">
         <button class="pill" data-fmt="single" aria-pressed="true">Single game</button>
         <button class="pill" data-fmt="series">Series</button>
+        <button class="pill" data-fmt="ws">World Series</button>
       </div>
+      <p class="hint hidden" id="ws-note">Best of seven. Every game is a random era and a random category, one pick each &mdash; the deeper player takes the game. First pick alternates. If it is still level after seven, it goes to sudden death.</p>
       <div id="series-opts" class="hidden">
         <div class="grp-label">How it ends</div>
         <div class="pill-set" id="smode-set">
@@ -127,7 +129,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="rounds-card">
       <h2>Rounds per game</h2>
       <div class="pill-set" id="rounds-set">
         <button class="pill" data-rounds="8">8 rounds</button>
@@ -148,10 +150,18 @@
       <p>Drafters take turns naming players in snake order: 1&#8209;2&#8209;3&#8209;4, then 4&#8209;3&#8209;2&#8209;1, back and forth.</p>
       <p><strong class="gold">Only the top 100 score.</strong> Name one of them and you get his rank &mdash; the 87th&#8209;best player is worth 87. Deep cuts pay more than obvious ones; that's the whole game.</p>
       <p>Once a player is named, he's off the board for everyone. Tied players share a rank and are worth the same, so if sixty men tie for 50th they are all worth 50.</p>
-      <p><strong class="gold">101 to 110 is a foul ball.</strong> It costs a strike if you have fewer than two; with two strikes it's free. Either way your turn ends, and each of those ten only saves you once.</p>
-      <p><strong class="gold">111 and beyond is a strike</strong>, however good he was. You'll still be told exactly what he did and where he ranked &mdash; the lists run hundreds deep, so you can see how close you came. Three strikes and you're done drafting; everyone else keeps going.</p>
-      <p>Typos and last names are forgiven. Naming someone already taken costs nothing.</p>
+      <p><strong class="gold">101 to 125 is a foul ball.</strong> It costs a strike if you have fewer than two; with two strikes it's free. Either way your turn ends, and each of those twenty-five only saves you once.</p>
+      <p><strong class="gold">Name the number one player and your foul band stretches to 140</strong> &mdash; for one pick. Rank 1 is worth one point, the least on the board, so it pays in rope instead: the next time you land between 126 and 140 it's a foul rather than a strike. If two men tie for first, either one earns it, and the seat panel shows it until it's spent.</p>
+      <p><strong class="gold">126 and beyond is a strike</strong> (141 and beyond with the extension), however good he was. You'll still be told exactly what he did and where he ranked &mdash; the lists run hundreds deep, so you can see how close you came. Three strikes and you're done drafting; everyone else keeps going.</p>
+      <p>Typos and last names are forgiven. Naming someone already taken costs nothing, and if the name you typed isn't an exact match you'll be offered a short list of who you might have meant &mdash; drawn from the whole era, not the leaderboard, so the list gives nothing away.</p>
       <p>Most points when the dust settles wins.</p>
+    </div>
+    <div class="card">
+      <h2>Other ways to play</h2>
+      <p><strong class="gold">Solo practice.</strong> One drafter, the same board and the same rules, nobody to beat. Pick "Until you are out" and see how far you get before three strikes. Solo games are kept in your records but never count as a win; the results screen tells you your best previous score on that exact board.</p>
+      <p><strong class="gold">Series.</strong> A run of ordinary games under one tally &mdash; best of N, first to N wins, first to N points, or a fixed number &mdash; with the era, the category or both re-rolled between games if you like. A drawn game advances nobody. The opening pick rotates from game to game.</p>
+      <p><strong class="gold">World Series.</strong> Best of seven. Every game is a random era and a random category and <em>one pick each</em>: whoever names the deeper player takes the game. Four wins takes the title; if it's still level after seven, it goes to sudden death until somebody leads outright. Eras are drawn evenly across single seasons, decades and long spans, so it isn't 1943 seven times.</p>
+      <p>Records are kept on this device only and are never sent anywhere. Export and Import on the Records screen move them between phones.</p>
     </div>
   </section>
 
@@ -285,7 +295,7 @@
           <div id="g-depth" class="big-label"></div>
         </div>
         <div class="shrink" style="text-align:right">
-          <div class="eyebrow" style="margin:0">Round</div>
+          <div class="eyebrow" style="margin:0" id="g-round-lbl">Round</div>
           <div id="g-round" class="big-label"></div>
         </div>
         <div class="shrink" style="text-align:right">

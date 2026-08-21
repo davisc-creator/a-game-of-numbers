@@ -10,7 +10,7 @@
 
 const G = {
   ix: null, files: new Map(), players: null,
-  seats: [], mode: 'solo', turn: 0, round: 0,
+  seats: [], mode: 'solo', turn: 0, pos: 0, round: 0,
   spin: null, respinTeam: 0, respinEra: 0, done: false, results: null,
   filter: 'all',
 };
@@ -149,6 +149,10 @@ async function doSpin({team = true, era = true} = {}){
   let cand = all;
   if (!team && G.spin) cand = all.filter(([k]) => k === G.spin.franch);
   if (!era && G.spin) cand = all.filter(([, y]) => y === G.spin.y0);
+  /* a respin that can come up identical is a respin that can cost a turn for
+     nothing; when the club's only window is the one showing, widen instead */
+  if (G.spin) cand = cand.filter(([k, y]) => !(k === G.spin.franch && y === G.spin.y0));
+  if (!cand.length) cand = all.filter(([k, y]) => !G.spin || !(k === G.spin.franch && y === G.spin.y0));
   if (!cand.length) cand = all;
   const [franch, y0] = pick(cand);
   $$('sx-status').textContent = 'Loading the club…';
@@ -170,13 +174,27 @@ function openSlots(seat, card){
   });
 }
 
+/* Every man already on somebody's roster. The spin rebuilds its card set from
+   the season files each time, so without this the same player could be drafted
+   twice - by two seats, or into two slots by one. */
+function taken(){
+  const t = new Set();
+  for (const s of G.seats) for (const p of Object.values(s.roster)) t.add(p.kind + ':' + p.id);
+  return t;
+}
+const isTaken = (c, t) => t.has(c.kind + ':' + c.id);
+
 function take(card){
   const seat = me();
+  if (isTaken(card, taken())){
+    $$('sx-status').textContent = `${card.name} has already been drafted.`;
+    return;
+  }
   const slots = openSlots(seat, card);
   if (!slots.length){
     $$('sx-status').textContent =
       `No open slot for a ${card.kind === 'bat' ? card.pos : card.pos}. ` +
-      (card.kind === 'bat' ? 'His position and your bench are full.' : 'Your staff is full.');
+      (card.kind === 'bat' ? 'His position is filled.' : 'Your staff is full.');
     return;
   }
   seat.roster[slots[0].k] = {...card, from: `${G.spin.franch} ${G.spin.y0}–${G.spin.y1}`};
@@ -189,17 +207,17 @@ function rosterFull(seat){ return SLOTS.every(s => seat.roster[s.k]); }
 async function nextTurn(){
   if (G.seats.every(rosterFull)) return finish1620();
   if (G.seats.length > 1){
-    /* snake, exactly as Game 100 orders its rounds */
+    /* Snake, exactly as Game 100 orders its rounds. The position in the round
+       and the seat it maps to are kept apart on purpose: an earlier version
+       wrote the mapped seat back into the counter, so every backward round was
+       one pick long and the last seat drew twice as often as anyone else. */
     const n = G.seats.length;
-    G.turn++;
-    if (G.turn >= n){ G.turn = 0; G.round++; }
-    const fwd = G.round % 2 === 0;
-    const idx = fwd ? G.turn : n - 1 - G.turn;
-    G.turn = idx;
     let guard = 0;
-    while (rosterFull(G.seats[G.turn]) && guard++ < 64){
-      G.turn = (G.turn + 1) % n;
-    }
+    do {
+      G.pos++;
+      if (G.pos >= n){ G.pos = 0; G.round++; }
+      G.turn = G.round % 2 === 0 ? G.pos : n - 1 - G.pos;
+    } while (rosterFull(G.seats[G.turn]) && guard++ < 64);
   }
   await doSpin();
 }
@@ -301,8 +319,8 @@ function renderSpin(){
   $$('sx-respin-team').disabled = G.respinTeam >= RESPINS;
   $$('sx-respin-era').disabled = G.respinEra >= RESPINS;
 
-  const seat = me();
-  const all = [...R.hitters, ...R.arms];
+  const seat = me(), gone = taken();
+  const all = [...R.hitters, ...R.arms].filter(c => !isTaken(c, gone));
   const usable = all.filter(c => openSlots(seat, c).length);
 
   const opts = filterOptions(all, seat);
@@ -410,13 +428,17 @@ async function start1620(){
     name: (s.name || '').trim() || `Drafter ${i + 1}`,
     roster: {}, picks: 0, sim: null,
   }));
-  G.turn = 0; G.round = 0; G.respinTeam = 0; G.respinEra = 0; G.done = false;
+  G.turn = 0; G.pos = 0; G.round = 0; G.respinTeam = 0; G.respinEra = 0; G.done = false;
   showScreen('draft');
   await doSpin();
 }
 
 function wire1620(){
-  $$('x-nav-setup').onclick = () => showScreen('setup');
+  $$('x-nav-setup').onclick = () => {
+    if (!G.done && G.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
+    if (G.seats.some(s => s.picks)) G.done = true;
+    showScreen('setup');
+  };
   $$('x-add-seat').onclick = () => { if (G.seats.length < 4){ G.seats.push({name: ''}); renderSeats1620(); } };
   $$('x-start').onclick = start1620;
   $$('x-again').onclick = () => showScreen('setup');
@@ -431,6 +453,8 @@ function wire1620(){
   $$('sx-free').onclick = () => doSpin();
   $$('sx-quit').onclick = () => {
     if (G.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
+    /* abandoned is abandoned: the shell must not ask a second time on the way out */
+    G.done = true;
     showScreen('setup');
   };
 }

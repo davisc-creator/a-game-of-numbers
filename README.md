@@ -5,7 +5,7 @@ the browser — no server, no accounts, no build step.
 
 | Game | What it is |
 | --- | --- |
-| **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players. The top 100 score their rank, 101–110 is a foul, 111 and beyond is a strike. Deep cuts pay more than obvious ones. |
+| **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players. The top 100 score their rank, 101–125 is a foul, 126 and beyond is a strike — unless you have named the number-one player, which stretches your foul band to 140 for one pick. Deep cuts pay more than obvious ones. |
 | **162-0** | Spin a club and a ten-year window, take one of their players, repeat until you have a 15-man roster — nine positions and six arms. Then it plays a season. |
 
 Switch between them from the **Games** menu, top right.

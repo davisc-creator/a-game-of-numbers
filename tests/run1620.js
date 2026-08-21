@@ -51,10 +51,13 @@ function load(){
   sandbox.globalThis = sandbox;
   const api = vm.runInNewContext(
     src + `\n;({G, SLOTS, FIELD, roster, leagueOver, spinnable, simulate, openSlots, take,
-             start1620, doSpin, WINDOW, MIN_AB, MIN_OUTS, REF_RPG,
+             start1620, doSpin, nextTurn, taken, isTaken, WINDOW, MIN_AB, MIN_OUTS, REF_RPG,
              filterOptions, applyFilter})`,
     sandbox, {filename: 'game1620.js'});
   api.__registered = () => registered;
+  /* top-level function declarations live on the vm's global object, so a test
+     can stand in for one - the draft's spin, say - without touching the file */
+  api.__sandbox = sandbox;
   return api;
 }
 
@@ -166,6 +169,52 @@ const app = load();
     }), 'every fielding slot holds a player who actually played there');
     ok(app.SLOTS.filter(s => s.kind === 'pit').every(s => seat.roster[s.k].kind === 'pit'),
        'no hitters on the pitching staff');
+
+    group('turn order');
+    {
+      /* the bug: the seat the counter mapped to was written back into the
+         counter, so every backward round was one pick long and the last seat
+         drew twice as often as anybody. Drive the real nextTurn with the spin
+         stubbed out so nothing is fetched. */
+      const realSpin = app.__sandbox.doSpin;
+      app.__sandbox.doSpin = async () => {};
+      const order = async n => {
+        app.G.seats = Array.from({length: n}, (_, i) => ({name: 'S' + i, roster: {}, picks: 0}));
+        app.G.turn = 0; app.G.pos = 0; app.G.round = 0; app.G.done = false;
+        const seen = [app.G.turn];
+        for (let i = 0; i < 4 * n - 1; i++){ await app.nextTurn(); seen.push(app.G.turn); }
+        return seen;
+      };
+      eq(await order(2), [0, 1, 1, 0, 0, 1, 1, 0], 'two seats snake 0-1-1-0');
+      eq(await order(3), [0, 1, 2, 2, 1, 0, 0, 1, 2, 2, 1, 0], 'three seats snake 0-1-2-2-1-0');
+      const four = await order(4);
+      eq(four, [0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3, 3, 2, 1, 0], 'four seats snake both ways');
+      const counts = four.reduce((m, t) => (m[t] = (m[t] || 0) + 1, m), {});
+      eq(Object.values(counts), [4, 4, 4, 4], 'and every seat gets the same number of picks');
+      /* a seat whose roster is full is skipped, and the others keep alternating */
+      app.G.seats = [{name: 'A', roster: {}, picks: 0}, {name: 'B', roster: {}, picks: 0}, {name: 'C', roster: {}, picks: 0}];
+      for (const sl of app.SLOTS) app.G.seats[1].roster[sl.k] = {name: 'x'};
+      app.G.turn = 0; app.G.pos = 0; app.G.round = 0; app.G.done = false;
+      const skip = [0];
+      for (let i = 0; i < 5; i++){ await app.nextTurn(); skip.push(app.G.turn); }
+      eq(skip, [0, 2, 2, 0, 0, 2], 'a full roster is skipped without breaking the snake');
+      app.__sandbox.doSpin = realSpin;
+    }
+
+    group('a drafted player is gone for everyone');
+    {
+      app.G.seats = [{name: 'A', roster: {}, picks: 0}, {name: 'B', roster: {}, picks: 0}];
+      app.G.turn = 0; app.G.pos = 0; app.G.round = 0;
+      const c = R.hitters[0];
+      app.G.seats[0].roster[app.openSlots(app.G.seats[0], c)[0].k] = {...c, from: 'test'};
+      const t = app.taken();
+      ok(app.isTaken(c, t), 'a man on a roster is taken');
+      ok(!app.isTaken(R.hitters[1], t), 'the next man is not');
+      const before = app.G.seats[1].picks;
+      app.G.turn = 1; app.G.spin = R;
+      app.take(c);
+      eq(app.G.seats[1].picks, before, 'and the other seat cannot draft him');
+    }
 
     group('card filters');
     {
