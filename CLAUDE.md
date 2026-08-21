@@ -123,9 +123,13 @@ value and rank, which needs every player, not just the ranked ones.
   from 101–110 on 2026-07-29 at the owner's direction.*
 - **Naming the number-one player earns a one-pick extension of the foul band to
   140** (`WIDE_TO`). Rank 1 is worth one point, the least on the board, so it
-  pays in rope instead. It is per person, counted in `p.wide`, spent by the
-  first pick that lands in 126–140 (which then fouls instead of striking, and
-  burns the man named like any foul), and shown on the seat panel until spent.
+  pays in rope instead. It is per person, counted in `p.wide`, and **only comes
+  into play at two strikes**, where a foul is free and the alternative is being
+  out: the first pick there that lands in 126–140 fouls instead of striking,
+  burns the man named like any foul, and spends it. At nought or one strike a
+  near miss is an ordinary strike and the extension is kept — the owner's
+  reasoning being that there is no point wasting the perk when it would only
+  stand in for a strike you can afford. Shown on the seat panel until spent.
   Ties at rank 1 all count — two men level at the top are both the best. A pick
   at 141 or beyond is a strike with or without it, and does not consume it. The
   miss record carries `w: true` so the per-game views can say which foul it
@@ -357,6 +361,17 @@ season five times in six and a random series reads as "1943 again". Kind is
 chosen uniformly, then a range within the kind. The suite asserts all three
 kinds come up and that spans and decades are not rare.
 
+**A World Series may also roll a span nobody has a file for** — `rollEra(post,
+true)` adds `custom` as a fourth kind, weighted like the other three, and
+`seriesNextGame` builds it through the same `buildCustom` path the Custom tab
+uses. 1962–1968 is a board nobody has seen, which is the point. Length is
+capped at `CUSTOM_ROLL_MIN`–`CUSTOM_ROLL_MAX` (3–12 seasons) because each
+season file is ~75 KB and a queue is not the place for two megabytes; a
+twelve-season build measured 457 KB, the same as the shipped 2015–2025 file.
+An ordinary random-era series never rolls one. If the build fails — an offline
+phone without those season files cached — the game falls back to a shipped
+range rather than ending the series.
+
 **The opening pick rotates** through the seats from game to game inside any
 series (`S.G.first`, consumed by `order`). In a multi-round snake it is merely
 fair; in a one-pick game it is essential, because the second picker knows the
@@ -509,7 +524,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  570 assertions, no
+  578 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.

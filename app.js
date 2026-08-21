@@ -877,7 +877,7 @@ function score(e){
   if (top){ p.wide++; p.wides++; }
   setPlate(`${p.name} scores`, String(e.rank),
     `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
-  if (top) setMsg(`Number one. ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
+  if (top) setMsg(`Number one. At two strikes, ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 280);
 }
@@ -894,9 +894,9 @@ function foul(f, wide){
   clearMsg();
   setPlate('Foul ball', 'FOUL',
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
-  const band = wide ? `${SCORE_TO + 1} to ${WIDE_TO} with the extension, now used` : `${SCORE_TO + 1} to ${FOUL_TO}`;
-  setMsg(free ? `Past the top ${SCORE_TO}, but at two strikes the foul is free${wide ? ' \u2014 extension used' : ''}. Turn passes.`
-              : `Past the top ${SCORE_TO} \u2014 ${band} is a foul. Strike ${p.strikes}. Turn passes.`,
+  setMsg(free ? (wide ? `${ord(f.rank)} would have been strike three \u2014 the extension makes it a free foul, and is used. Turn passes.`
+                      : `Past the top ${SCORE_TO}, but at two strikes the foul is free. Turn passes.`)
+              : `Past the top ${SCORE_TO} \u2014 ${SCORE_TO + 1} to ${FOUL_TO} is a foul. Strike ${p.strikes}. Turn passes.`,
          'warn');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 420);
@@ -905,8 +905,10 @@ function foul(f, wide){
 /* A strike still tells you what the player actually did. */
 function strike(raw, e){
   const p = S.G.players[seat()];
-  /* an earned extension turns a near miss into a foul, once */
-  if (e && e.rank && e.rank > FOUL_TO && e.rank <= WIDE_TO && p.wide > 0){
+  /* An earned extension turns a near miss into a foul, once - but only at two
+     strikes, where a foul is free and the alternative is being out. At nought
+     or one it would be spent on an ordinary strike, so it is kept. */
+  if (e && e.rank && e.rank > FOUL_TO && e.rank <= WIDE_TO && p.wide > 0 && p.strikes >= 2){
     p.wide--;
     return foul(e, true);
   }
@@ -1134,28 +1136,48 @@ function renderSeries(){
    ranges is a single season five times in six and a random series reads as
    "1943 again". Has to land on a range that actually exists for this season
    type - not every year has a postseason file. */
-function rollEra(post){
+function rollEra(post, custom){
   const pool = (S.manifest ? S.manifest.ranges : []).filter(r => post ? r.post : r.reg);
   if (!pool.length) return null;
   const kinds = [...new Set(pool.map(r => r.kind))];
+  /* A span nobody has a file for - 1961-1983 - is a board nobody has seen, and
+     the World Series is the one place that is worth a fetch. Built in the
+     browser from the season files like any custom range, so the length is
+     capped: each season is ~75 KB and a queue is not the place for two
+     megabytes. Offered as a fourth kind, weighted like the other three. */
+  if (custom) kinds.push('custom');
   const kind = kinds[Math.floor(Math.random() * kinds.length)];
+  if (kind === 'custom'){
+    const lo = (S.manifest && S.manifest.first) || 1920, hi = (S.manifest && S.manifest.last) || 2025;
+    const n = CUSTOM_ROLL_MIN + Math.floor(Math.random() * (CUSTOM_ROLL_MAX - CUSTOM_ROLL_MIN + 1));
+    const y0 = lo + Math.floor(Math.random() * (hi - lo - n + 2));
+    return {kind: 'custom', y0, y1: y0 + n - 1, id: `${y0}-${y0 + n - 1}`};
+  }
   const of = pool.filter(r => r.kind === kind);
   return of[Math.floor(Math.random() * of.length)];
 }
+/* 3 to 12 seasons: long enough to be a real era, short enough to arrive */
+const CUSTOM_ROLL_MIN = 3, CUSTOM_ROLL_MAX = 12;
 
 async function seriesNextGame(){
   const sr = S.SR;
   if (sr.randEra && S.manifest){
-    const r = rollEra(S.post);
+    const r = rollEra(S.post, sr.ws);
     if (r){
-      S.custom = null;
       /* a club filter is kept for an ordinary random-era series - "the Giants,
          random decade" is a fair game - but a World Series is the whole league,
          and a club that did not exist in the rolled era would end it early */
       if (sr.ws && S.teams.length){ S.teams = []; renderTeams(); }
+      S.custom = r.kind === 'custom' ? {y0: r.y0, y1: r.y1} : null;
       S.rangeId = r.id;
       renderRanges();
       await loadRange();
+      /* a custom span needs its season files, which an offline phone may not
+         have; rather than end the series, fall back to a shipped range */
+      if (S.custom && !S.data){
+        const f = rollEra(S.post, false);
+        if (f){ S.custom = null; S.rangeId = f.id; renderRanges(); await loadRange(); }
+      }
     }
   }
   if (sr.randCat && S.data){

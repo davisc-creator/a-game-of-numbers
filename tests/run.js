@@ -1044,34 +1044,38 @@ group('the foul band and the earned extension');
   eq(B.wides, 1, 'and it is counted for the record');
   ok(/foul to 140/.test(app.__els.get('board').innerHTML), 'the seat panel shows it');
 
-  /* B spends it: 135 is a foul rather than a strike, and the turn still ends */
+  /* it is kept until it matters: at no strikes a near miss is an ordinary
+     strike and the extension stays in hand */
   app.S.G.pos = 1; app.S.G.round = 0;
-  const s0 = B.strikes, f0 = B.fouls, t0 = B.turns;
   app.strike('x', at(135)); app.__drain();
-  eq([B.strikes - s0, B.fouls - f0, B.turns - t0], [1, 1, 1], 'a pick at 135 with an extension is a foul: one strike, one foul, turn over');
+  eq(B.strikes, 1, 'at no strikes, 135 is a strike');
+  eq(B.wide, 1, 'and the extension is not spent on it');
+  app.S.G.pos = 1; app.S.G.round = 0;
+  app.strike('x', at(136)); app.__drain();
+  eq([B.strikes, B.wide], [2, 1], 'at one strike, the same');
+
+  /* at two strikes it is what stands between a near miss and being out */
+  app.S.G.pos = 1; app.S.G.round = 0;
+  const f0 = B.fouls, t0 = B.turns;
+  app.strike('x', at(137)); app.__drain();
+  eq(B.strikes, 2, 'at two strikes, 137 with an extension is a foul - and a foul at two strikes is free');
+  ok(!B.out, 'so B is still in');
+  eq([B.fouls - f0, B.turns - t0], [1, 1], 'one foul, turn over');
   eq(B.wide, 0, 'and the extension is used up');
-  ok(at(135).missed, 'the man named is burned like any foul');
+  ok(at(137).missed, 'the man named is burned like any foul');
   const last = app.S.G.misses[app.S.G.misses.length - 1];
   eq([last.kind, last.wide], ['foul', true], 'and the miss says it was the extension that saved it');
 
-  /* spent: the next 135 is a strike again, and 141 never fouls */
+  /* spent: the next near miss is strike three; and 141 never fouls */
   app.S.G.pos = 1; app.S.G.round = 0;
-  app.strike('x', at(136)); app.__drain();
-  eq(B.strikes - s0, 2, 'with the extension gone 136 is a strike');
-  B.wide = 1;
-  app.S.G.pos = 1; app.S.G.round = 0;
-  const s1 = B.strikes;
-  app.strike('x', at(145)); app.__drain();
-  eq(B.strikes - s1, 1, '145 is a strike even with an extension in hand');
-  eq(B.wide, 1, 'and does not consume it');
-
-  /* a foul at two strikes is free; an extended one is too */
+  app.strike('x', at(138)); app.__drain();
+  ok(B.out && B.strikes === 3, 'with the extension gone, 138 is strike three');
   const G2 = gameOn(app, 'bat_h6', ['A']);
   const p = G2.players[0];
   p.strikes = 2; p.wide = 1;
-  app.strike('x', G2.pool.all.find(e => e.rank === 130)); app.__drain();
-  eq(p.strikes, 2, 'an extended foul at two strikes is free, like any foul');
-  ok(!p.out, 'so the player is still in');
+  app.strike('x', G2.pool.all.find(e => e.rank === 145)); app.__drain();
+  ok(p.out, '145 is a strike even with an extension in hand at two strikes');
+  eq(p.wide, 1, 'and does not consume it');
 }
 {
   /* the record carries the count, and an old record without it reads as zero */
@@ -1154,6 +1158,13 @@ group('World Series');
   ok(kinds.get('span') > 40 && kinds.get('decade') > 40,
      `spans (${kinds.get('span')}) and decades (${kinds.get('decade')}) come up about as often as seasons (${kinds.get('season')}), not one time in eighteen`);
   ok([...Array(50)].every(() => app.rollEra(true).post), 'a postseason roll only lands on ranges with a postseason file');
+  ok([...Array(100)].every(() => app.rollEra(false).kind !== 'custom'), 'an ordinary series never rolls a span that has to be built');
+  /* the World Series may: a span nobody has a file for, capped so it arrives */
+  const customs = [...Array(400)].map(() => app.rollEra(false, true)).filter(r => r.kind === 'custom');
+  ok(customs.length > 50, `${customs.length} of 400 World Series rolls are a built span`);
+  ok(customs.every(r => r.y1 - r.y0 + 1 >= 3 && r.y1 - r.y0 + 1 <= 12), 'between three and twelve seasons long');
+  ok(customs.every(r => r.y0 >= 1920 && r.y1 <= 2025), 'and inside the data');
+  ok(customs.every(r => r.id === `${r.y0}-${r.y1}`), 'with the id shape the records and recYears expect');
 }
 {
   /* the setup screen: a World Series needs no era, category or rounds of its own */
