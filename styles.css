@@ -75,6 +75,13 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .strikes i.on{border-color:var(--out);background:var(--out)}
 .wide-tag{font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;
   color:var(--pole);margin-top:4px;min-height:13px}
+
+/* the World Series turn-over */
+.rv-row{border-top:1px solid var(--rule);padding:10px 0}
+.rv-row:first-child{border-top:0}
+.rv-top{display:flex;align-items:baseline;gap:10px;margin-bottom:5px}
+.rv-nm{flex:1;font-size:18px}
+.rv-pts{font-family:'Bebas Neue',sans-serif;font-size:30px;color:var(--pole);line-height:1}
 .turn-tag{font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;color:var(--pole);margin-bottom:2px;height:14px}
 
 .plate{border:2px solid var(--rule);background:var(--slot);padding:16px;text-align:center;margin-bottom:14px}

@@ -91,6 +91,7 @@ function loadApp(){
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
    soloPriorBest, renderSeats, renderRecords, histPicks, syncFormat, rollEra, WS,
+   revealDone, renderReveal, sealed,
    SCORE_TO, FOUL_TO, WIDE_TO, loadRecords, loadRange,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
 
@@ -1096,6 +1097,7 @@ group('World Series');
   const sr = app.S.SR;
   ok(sr.ws, 'the series is marked as a World Series');
   eq([sr.mode, sr.n], ['bo', 7], 'and is a best of seven whatever the series controls said');
+  eq(sr.wsn, 1, 'one player each by default');
   ok(sr.randCat && sr.randEra, 'with a random era and category every game');
   eq(app.seriesLabel(sr), 'World Series', 'labelled as such');
 
@@ -1114,11 +1116,17 @@ group('World Series');
   ok(G.saved, 'after B picks it is over - one pick each');
   const rec = app.getRecords()[app.getRecords().length - 1];
   ok(rec.sws && rec.sid === sr.id, 'the record carries the World Series flag and the series id');
-  eq(sr.games.length, 1, 'and the series took the game');
+  /* face down: the game stops at the turn-over and only counts once asked */
+  eq(sr.games.length, 0, 'the game is not taken until the picks are turned over');
+  ok(/Willie Mays/.test(app.__els.get('rv-rows').innerHTML)
+     && /Hank Aaron/.test(app.__els.get('rv-rows').innerHTML), 'the reveal shows both picks');
+  app.revealDone();
+  eq(sr.games.length, 1, 'and the series takes it when the room has seen them');
   eq(sr.games[0].scores.find(x => x.name === 'B').win, true, 'B took game one with the deeper pick');
 
   app.S.data = FIX(); app.startGame(); app.__drain();
   G = app.S.G;
+  eq(G.maxRounds, 1, 'still one pick each at the default');
   eq(G.first, 1, 'B opens game two');
   eq(app.order(0), [1, 0], 'so the order flips');
   eq(app.__els.get('g-round').textContent, '2/7', 'game two of seven');
@@ -1171,11 +1179,11 @@ group('World Series');
   app.S.seats = ['A', 'B'];
   app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, randCat: false, randEra: false};
   const hidden = new Map();
-  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card', 'series-opts', 'ws-note'])
+  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card', 'series-opts', 'ws-opts'])
     app.__els.get(id).classList.toggle = (c, on) => hidden.set(id, on);
   app.syncFormat();
   ok(['era-card', 'team-card', 'cat-card', 'rounds-card'].every(id => hidden.get(id) === true), 'the era, club, category and rounds cards are hidden');
-  eq(hidden.get('ws-note'), false, 'and the World Series note is shown');
+  eq(hidden.get('ws-opts'), false, 'and the World Series options are shown');
   eq(app.__els.get('start').textContent, 'Play the World Series', 'the start button says what it starts');
   app.S.seats = ['A'];
   app.syncFormat();
@@ -1183,6 +1191,103 @@ group('World Series');
   app.S.seats = ['A', 'B']; app.S.fmt = {on: false, ws: false, mode: 'bo', n: 7, randCat: false, randEra: false};
   app.syncFormat();
   eq(app.__els.get('start').textContent, 'Start draft', 'and a single game reads as before');
+}
+
+group('World Series: shared wins, tiebreaks and depth');
+{
+  const rec = (ts, scores) => ({ts, range: '2024', cat: 'bat_h', label: 'Hits', post: false,
+    players: Object.entries(scores).map(([name, pts]) => ({name, pts, picks: 1, strikes: 0, fouls: 0, ranks: [pts]}))});
+  const run = (names, games, wsn) => {
+    app.S.seats = names;
+    app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, wsn: wsn || 1, randCat: true, randEra: true};
+    app.startSeries();
+    let done = false, played = 0;
+    for (const g of games){ if (done) break; done = app.seriesTake(rec(3000 + played, g)); played++; }
+    return {done, played, sr: app.S.SR, standing: app.seriesStanding()};
+  };
+
+  /* two of three level at the top have still beaten the third, so both win */
+  let r = run(['A','B','C'], [{A: 50, B: 50, C: 10}]);
+  eq(r.sr.games[0].drawn, false, 'two of three tying is not a draw');
+  eq(r.sr.games[0].scores.filter(s => s.win).map(s => s.name).sort(), ['A','B'], 'both leaders take a win');
+  eq([r.standing[0].wins, r.standing[1].wins], [1, 1], 'and both are on one');
+  eq(r.sr.wins.C, undefined, 'the drafter they beat gets nothing');
+
+  /* the whole table level is still a draw and advances nobody */
+  r = run(['A','B','C'], [{A: 50, B: 50, C: 50}]);
+  eq(r.sr.games[0].drawn, true, 'everybody level is a draw');
+  eq(r.sr.games[0].scores.filter(s => s.win).length, 0, 'and advances nobody');
+  r = run(['A','B'], [{A: 50, B: 50}]);
+  eq(r.sr.games[0].drawn, true, 'which with two drafters is the old rule, unchanged');
+
+  /* shared wins can still finish it: four apiece is four each */
+  r = run(['A','B','C'], [{A:9,B:9,C:1},{A:9,B:9,C:1},{A:9,B:9,C:1},{A:9,B:9,C:1}]);
+  ok(r.done && r.played === 4, 'four shared wins ends the series');
+  eq([r.standing[0].wins, r.standing[1].wins], [4, 4], 'with two champions on four');
+
+  /* level on wins after seven: total points decides */
+  /* A's wins are bigger than B's, so the totals differ even at three apiece */
+  r = run(['A','B'], [{A:20,B:1},{A:1,B:9},{A:20,B:1},{A:1,B:9},{A:20,B:1},{A:1,B:9},{A:5,B:5}]);
+  ok(r.done, 'three wins each and a draw in game seven still ends it');
+  eq(r.played, 7, 'at seven games');
+  eq(r.standing[0].wins, r.standing[1].wins, 'level on wins');
+  eq([r.standing[0].name, r.standing[0].pts, r.standing[1].pts], ['A', 68, 35], 'so the higher total takes it');
+
+  /* level on wins AND points goes to sudden death */
+  r = run(['A','B'], [{A:9,B:1},{A:1,B:9},{A:9,B:1},{A:1,B:9},{A:9,B:1},{A:1,B:9},{A:5,B:5},{A:9,B:1}]);
+  eq(r.played, 8, 'level on both is sudden death');
+  ok(r.done && r.standing[0].name === 'A', 'until somebody leads outright');
+}
+{
+  /* 1, 3, 5 or 7 players each: the rounds setting is ignored either way */
+  for (const wsn of [1, 3, 5, 7]){
+    app.S.seats = ['A','B'];
+    app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, wsn, randCat: false, randEra: false};
+    app.startSeries();
+    eq(app.S.SR.wsn, wsn, `a World Series of ${wsn} players each carries it`);
+    app.S.data = FIX(); app.S.catId = 'bat_h6'; app.S.rangeId = 'test'; app.S.post = false; app.S.rounds = 12;
+    app.startGame(); app.__drain();
+    eq(app.S.G.maxRounds, wsn, `and the game runs ${wsn} round${wsn === 1 ? '' : 's'}`);
+  }
+  /* three each: the game ends after three rounds, not twelve */
+  const G = app.S.G;   // wsn 7 from the loop; rebuild at 3
+  void G;
+  app.S.fmt.wsn = 3; app.startSeries();
+  app.S.data = FIX(); app.startGame(); app.__drain();
+  const board = app.S.G.pool.board.filter(e => !e.drafted);
+  for (let i = 0; i < 6 && !app.S.G.saved; i++){ app.score(board[i]); app.__drain(); }
+  ok(app.S.G.saved, 'three picks each ends the game');
+  eq(app.S.G.players.map(p => p.picks), [3, 3], 'three apiece');
+  app.revealDone();
+  eq(app.S.SR.games.length, 1, 'and it counts once turned over');
+  app.S.SR = null; app.S.fmt = {on: false, ws: false, mode: 'bo', n: 7, wsn: 1, randCat: false, randEra: false};
+}
+{
+  /* face down: nothing on the game screen tells the next picker the target */
+  app.S.seats = ['A','B'];
+  app.S.fmt = {on: true, ws: true, mode: 'bo', n: 7, wsn: 1, randCat: false, randEra: false};
+  app.startSeries();
+  app.S.data = FIX(); app.S.catId = 'bat_h6'; app.S.rangeId = 'test'; app.S.post = false; app.S.rounds = 12;
+  app.startGame(); app.__drain();
+  ok(app.sealed(), 'a World Series game is sealed');
+  app.score(app.S.G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();
+  const board = app.__els.get('board').innerHTML, log = app.__els.get('log').innerHTML;
+  ok(!/Hank Aaron/.test(board + log), 'the pick is not named anywhere on the screen');
+  ok(!/>3</.test(board), 'nor its rank');
+  ok(!/Aaron/.test(app.__els.get('plate-sub').textContent), 'and the plate does not give it away');
+  eq(app.__els.get('plate-big').textContent, '\u2713', 'it just says a pick landed');
+  app.score(app.S.G.pool.board.find(e => e.name === 'Willie Mays')); app.__drain();
+  ok(/Hank Aaron/.test(app.__els.get('rv-rows').innerHTML), 'the turn-over names them');
+  app.revealDone();
+  app.S.SR = null; app.S.fmt = {on: false, ws: false, mode: 'bo', n: 7, wsn: 1, randCat: false, randEra: false};
+}
+{
+  /* an ordinary game still plays face up */
+  const G = gameOn(app, 'bat_h6', ['A','B']);
+  ok(!app.sealed(), 'a single game is not sealed');
+  app.score(G.pool.board.find(e => e.name === 'Hank Aaron')); app.__drain();
+  ok(/Hank Aaron/.test(app.__els.get('log').innerHTML), 'and shows the draft list as it fills');
+  eq(app.__els.get('plate-big').textContent, '3', 'and the rank on the plate');
 }
 
 group('review fixes');

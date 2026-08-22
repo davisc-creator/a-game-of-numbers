@@ -4,7 +4,7 @@ const S = {
   manifest: null, data: null,
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
   seats: ['', ''], rounds: 12, G: null, recSort: 'ppg', teams: [], teamMode: 'all',
-  fmt: {on: false, ws: false, mode: 'bo', n: 7, randCat: false, randEra: false},
+  fmt: {on: false, ws: false, mode: 'bo', n: 7, wsn: 1, randCat: false, randEra: false},
   SR: null,
 };
 /* The scoring rule, and the only place it lives. Rank 1-100 scores its own
@@ -707,7 +707,7 @@ function startGame(){
        `first` rotates the opening pick through the seats from game to game
        inside a series: in a one-pick game the second picker knows the number
        to beat, so going first every time is a real handicap. */
-    round: 0, pos: 0, maxRounds: (S.SR && S.SR.ws) ? 1 : S.rounds,
+    round: 0, pos: 0, maxRounds: (S.SR && S.SR.ws) ? (S.SR.wsn || 1) : S.rounds,
     first: (S.SR && !S.SR.done) ? S.SR.games.length % S.seats.length : 0,
     log: [], misses: [], saved: false,
     /* attempts inside the current turn. A re-prompt - already taken, already
@@ -875,9 +875,13 @@ function score(e){
      two men level at rank 1 are both the best. */
   const top = e.rank === 1;
   if (top){ p.wide++; p.wides++; }
-  setPlate(`${p.name} scores`, String(e.rank),
-    `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
-  if (top) setMsg(`Number one. At two strikes, ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
+  if (sealed()){
+    setPlate(`${p.name} has picked`, '\u2713', 'Turned over when everyone has named somebody.', 'good');
+  } else {
+    setPlate(`${p.name} scores`, String(e.rank),
+      `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
+    if (top) setMsg(`Number one. At two strikes, ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
+  }
   $('guess').value = ''; renderGame();
   setTimeout(advance, 280);
 }
@@ -892,6 +896,11 @@ function foul(f, wide){
   const free = p.strikes >= 2;
   if (!free) p.strikes++;
   clearMsg();
+  if (sealed()){
+    setPlate(`${p.name} has picked`, '\u2713', 'Turned over when everyone has named somebody.', 'foul');
+    $('guess').value = ''; renderGame();
+    return void setTimeout(advance, 300);
+  }
   setPlate('Foul ball', 'FOUL',
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
   setMsg(free ? (wide ? `${ord(f.rank)} would have been strike three \u2014 the extension makes it a free foul, and is used. Turn passes.`
@@ -923,8 +932,10 @@ function strike(raw, e){
                               + (e.rank > FOUL_TO ? ` \u00b7 only the top ${SCORE_TO} score` : '');
   else if (e)           sub = `${e.name} \u2014 no ${S.G.abbr} in this era`;
   else                  sub = `${(raw || '').trim().slice(0, 28) || '\u2014'} didn't play in this era`;
-  if (p.strikes >= 3){
-    p.out = true;
+  if (p.strikes >= 3) p.out = true;
+  if (sealed()){
+    setPlate(`${p.name} has picked`, '\u2713', 'Turned over when everyone has named somebody.', 'bad');
+  } else if (p.out){
     setPlate(`${p.name} is out`, 'X', sub, 'bad');
   } else {
     setPlate('Strike', 'X'.repeat(p.strikes), sub, 'bad');
@@ -983,12 +994,18 @@ function finish(){
     ? left.map(e => `${String(e.rank).padStart(4,' ')}  ${esc(e.name)}  \u00b7  ${fmtVal(e.val)} ${G.abbr}`).join('<br>')
     : 'Every player got taken.';
   if (S.SR && rec){
+    /* face down until asked: the reveal turns the picks over, then takes the
+       game into the series when the room has seen them */
+    if (S.SR.ws) return renderReveal(rec);
     seriesTake(rec);
     renderSeries();
     return show('series');
   }
   show('over');
 }
+
+/* A World Series game is played face down; everything else is played face up. */
+const sealed = () => !!(S.SR && S.SR.ws && S.G);
 
 /* Best this person has scored solo on this exact board before. Same category,
    same range, same postseason flag, same clubs - a different board is a
@@ -1046,6 +1063,7 @@ function startSeries(){
   S.SR = {
     id: Date.now(), ws,
     mode: ws ? 'bo' : S.fmt.mode, n: ws ? WS.n : S.fmt.n,
+    wsn: ws ? (S.fmt.wsn || 1) : 0,
     randCat: ws || S.fmt.randCat, randEra: ws || S.fmt.randEra,
     names: S.seats.map((n, i) => (n.trim() || `Drafter ${i + 1}`)),
     wins: {}, pts: {}, games: [], done: false,
@@ -1060,15 +1078,20 @@ function seriesTake(rec){
      best-of-three end 2-2 after two draws. Points still accumulate. */
   const top = Math.max(...rec.players.map(p => p.pts));
   const leaders = rec.players.filter(p => p.pts === top);
-  const winner = leaders.length === 1 ? leaders[0].name : null;
+  /* Everybody level is a draw and advances nobody - crediting them all let a
+     best-of-three finish 2-2 after two draws. But with three or more drafters,
+     two tying at the top have still beaten everyone else, so both take a win.
+     A draw is only when the whole table is level. */
+  const drawn = leaders.length === rec.players.length;
+  const won = drawn ? [] : leaders.map(p => p.name);
 
   sr.games.push({
     no: sr.games.length + 1, label: rec.label, range: rec.range, post: rec.post,
-    drawn: !winner,
-    scores: rec.players.map(p => ({name: p.name, pts: p.pts, win: p.name === winner})),
+    drawn,
+    scores: rec.players.map(p => ({name: p.name, pts: p.pts, win: won.includes(p.name)})),
   });
   for (const p of rec.players) sr.pts[p.name] = (sr.pts[p.name] || 0) + p.pts;
-  if (winner) sr.wins[winner] = (sr.wins[winner] || 0) + 1;
+  for (const n of won) sr.wins[n] = (sr.wins[n] || 0) + 1;
 
   const target = seriesTarget(sr);
   const best = k => Math.max(0, ...Object.values(sr[k]));
@@ -1076,9 +1099,13 @@ function seriesTake(rec){
      strike, or both land the same rank - so seven games can pass with nobody at
      four. Past game seven it becomes sudden death: it ends the moment somebody
      leads outright on wins, or at the same cap first-to-N-wins uses. */
+  /* Standings sort by wins then total points, so an outright leader is simply
+     one nobody matches on both. Points are the tiebreaker the owner asked for:
+     level on wins after seven, the higher total takes it, and only a table
+     level on both goes to sudden death. */
   const soleLeader = () => {
-    const w = Object.values(sr.wins);
-    return w.length > 0 && w.filter(x => x === best('wins')).length === 1;
+    const r = seriesStanding();
+    return r.length > 1 && (r[0].wins > r[1].wins || (r[0].wins === r[1].wins && r[0].pts > r[1].pts));
   };
   if (sr.ws)                     sr.done = best('wins') >= target
                                    || (sr.games.length >= sr.n && soleLeader())
@@ -1090,6 +1117,40 @@ function seriesTake(rec){
      the standings screen also offers "End series now" at any point */
   else                           sr.done = best('wins') >= target || sr.games.length >= 99;
   return sr.done;
+}
+
+/* The turn-over. Everyone's picks side by side, deepest first, with the winner
+   held back until the button is pressed - the point of playing face down is the
+   moment they all land at once. */
+function renderReveal(rec){
+  S.reveal = rec;
+  const rows = [...rec.players].sort((a, b) => b.pts - a.pts);
+  const top = rows[0].pts, all = rows.every(r => r.pts === top);
+  const sr = S.SR;
+  $('rv-head').textContent = `Game ${sr.games.length + 1}`;
+  $('rv-sub').textContent = `${rec.label} \u00b7 ${rec.range || ''}${rec.post ? ' postseason' : ''}`;
+  $('rv-rows').innerHTML = rows.map(p => {
+    const picks = (p.picked || []).slice().sort((a, b) => a.r - b.r);
+    const misses = (rec.misses || []).filter(m => m.by === p.name);
+    return `<div class="rv-row">
+      <div class="rv-top"><div class="rv-nm">${esc(p.name)}</div><div class="rv-pts">${p.pts}</div></div>
+      ${picks.map(pk => `<div class="gm-pick"><span class="r">${pk.r}</span>${esc(pk.n)}</div>`).join('')
+        || '<div class="gm-pick"><span class="r">\u2014</span>nothing landed</div>'}
+      ${misses.map(m => `<div class="gm-pick miss"><span class="r">${m.r || '\u2014'}</span>${esc(m.n)}<span class="tag">${m.k}${m.w ? ' \u00b7 ' + WIDE_TO : ''}</span></div>`).join('')}
+    </div>`;
+  }).join('');
+  $('rv-go').textContent = all ? 'Level \u2014 see the standings'
+    : rows.filter(r => r.pts === top).length > 1 ? 'Shared \u2014 see the standings'
+    : 'See the standings';
+  show('reveal');
+}
+
+/* Turned over and seen; now it counts. */
+function revealDone(){
+  const rec = S.reveal; S.reveal = null;
+  if (rec) seriesTake(rec);
+  renderSeries();
+  show('series');
 }
 
 function seriesStanding(){
@@ -1245,24 +1306,32 @@ function renderGame(){
   }
   $('g-left').textContent = openLeft();
   const t = seat();
+  /* A World Series game is sealed: nobody sees a rank, a score or a name until
+     everyone has picked and they are turned over together. Showing them as
+     they land handed the last picker the number to beat, which is most of the
+     game when there is only one pick each. */
+  const seal = !!(sr && sr.ws);
   $('board').innerHTML = G.players.map((p, i) => `
     <div class="seat-panel ${i === t && !p.out ? 'active' : ''} ${p.out ? 'dead' : ''}">
       <div class="turn-tag">${i === t && !p.out ? 'On the clock' : ''}</div>
       <div class="nm">${esc(p.name)}</div>
-      <div class="pts">${p.pts}</div>
+      <div class="pts">${seal ? (p.picks + p.strikes + p.fouls ? '\u2713'.repeat(Math.min(p.picks + p.strikes + p.fouls, 7)) : '\u2014') : p.pts}</div>
       <div class="strikes">${[0,1,2].map(s => `<i class="${s < p.strikes ? 'on' : ''}"></i>`).join('')}</div>
       <div class="wide-tag">${p.wide ? `foul to ${WIDE_TO}${p.wide > 1 ? ' ×' + p.wide : ''}` : ''}</div>
     </div>`).join('');
-  $('log').innerHTML = [...G.log].sort((a,b) => a.rank - b.rank).map(r => `
+  $('log').innerHTML = seal ? '' : [...G.log].sort((a,b) => a.rank - b.rank).map(r => `
     <div class="log-row">
       <div class="rk">${r.rank}</div>
       <div class="pl">${esc(r.name)} <span class="mono">${fmtVal(r.val)} ${G.abbr}</span></div>
       <div class="who">${esc(r.by)}</div>
     </div>`).join('');
-  $('log-empty').classList.toggle('hidden', G.log.length > 0);
+  $('log-empty').classList.toggle('hidden', !seal && G.log.length > 0);
+  $('log-empty').textContent = seal
+    ? 'Picks stay hidden until everyone has named somebody.'
+    : 'Nobody drafted yet.';
   /* misses sit under the taken list: a named man is out of play either way, and
      seeing what has already been burned is half the information in the room */
-  const miss = G.misses || [];
+  const miss = seal ? [] : (G.misses || []);
   $('miss-label').classList.toggle('hidden', !miss.length);
   $('miss-log').innerHTML = miss.map(m => `
     <div class="log-row miss">
@@ -1328,7 +1397,12 @@ function syncFormat(){
   $('s-n-label').textContent = m.unit === 'points' ? 'Points' : (S.fmt.mode === 'bo' ? 'Games' : m.unit === 'wins' ? 'Wins' : 'Games');
   $('s-n-note').textContent = m.note(S.fmt.n);
   $('series-opts').classList.toggle('hidden', !S.fmt.on || ws);
-  $('ws-note').classList.toggle('hidden', !ws);
+  $('ws-opts').classList.toggle('hidden', !ws);
+  press('#wsn-set .pill', x => +x.dataset.wsn === (S.fmt.wsn || 1));
+  const wsn = S.fmt.wsn || 1;
+  $('wsn-note').textContent = wsn === 1
+    ? 'One player each. One name, turned over together, deepest takes the game.'
+    : `${wsn} players each, snake order. Most points across the ${wsn} takes the game.`;
   for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card'])
     $(id).classList.toggle('hidden', ws);
   press('#fmt-set .pill', x => x.dataset.fmt === (!S.fmt.on ? 'single' : S.fmt.ws ? 'ws' : 'series'));
@@ -1967,7 +2041,7 @@ function renderProfile(name){
 }
 
 /* ------------------------------------------------------------------- nav */
-const SCREENS = ['setup','rules','records','profile','game','series','over'];
+const SCREENS = ['setup','rules','records','profile','game','reveal','series','over'];
 function show(name){
   SCREENS.forEach(s => $('screen-' + s).classList.toggle('hidden', s !== name));
   ['setup','rules','records'].forEach(s => {
@@ -2065,6 +2139,9 @@ function wire(){
     if (Number.isInteger(v) && v > 0) S.fmt.n = v;
     syncFormat();
   };
+  document.querySelectorAll('#wsn-set .pill').forEach(el => el.onclick = () => {
+    S.fmt.wsn = +el.dataset.wsn; syncFormat();
+  });
   document.querySelectorAll('#svary-set .pill').forEach(el => el.onclick = () => {
     if (el.dataset.vary === 'cat') S.fmt.randCat = !S.fmt.randCat;
     else S.fmt.randEra = !S.fmt.randEra;
@@ -2072,12 +2149,38 @@ function wire(){
   });
   syncFormat();
 
+  $('rv-go').onclick = revealDone;
   $('ser-next').onclick = () => seriesNextGame();
   $('ser-done').onclick = () => { S.SR = null; renderRecords(); show('records'); };
 
   /* A World Series rolls its first era and category the same way it rolls the
      rest, so it starts through the series path rather than with whatever the
      setup screen happened to have selected. */
+  /* the same roll the World Series uses, offered to an ordinary game: a random
+     era and a random stat, which is the fastest way to a board nobody knows */
+  $('era-random').onclick = async () => {
+    const btn = $('era-random');
+    btn.disabled = true; btn.textContent = 'Rolling\u2026';
+    const r = rollEra(S.post, true);
+    if (r){
+      S.teams = []; renderTeams();
+      S.custom = r.kind === 'custom' ? {y0: r.y0, y1: r.y1} : null;
+      S.kind = r.kind === 'custom' ? 'custom' : r.kind;
+      S.rangeId = r.id;
+      renderRanges();
+      await loadRange();
+      if (!S.data && S.custom){        // a built span the phone cannot fetch
+        const f = rollEra(S.post, false);
+        if (f){ S.custom = null; S.kind = f.kind; S.rangeId = f.id; renderRanges(); await loadRange(); }
+      }
+      if (S.data){
+        const keys = Object.keys(S.data.cats);
+        if (keys.length){ S.catId = keys[Math.floor(Math.random() * keys.length)]; renderCats(); }
+      }
+    }
+    btn.disabled = false; btn.textContent = 'Surprise me \u2014 random era and stat';
+  };
+
   $('start').onclick  = () => {
     S.SR = null;
     if (S.fmt.on && S.fmt.ws){ startSeries(); return seriesNextGame(); }

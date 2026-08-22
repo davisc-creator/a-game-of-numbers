@@ -388,11 +388,32 @@ while it is chosen because none of them apply. A club filter is cleared for it
 while an ordinary random-era series keeps its clubs, since "the Giants, random
 decade" is a fair game.
 
-It has its own end rule because one-pick games draw often (both strike, or the
-same rank): four wins ends it, or seven games with an outright leader on wins;
-level after seven is sudden death until somebody leads outright, capped at 99
-like first-to-N-wins. A shared title was the alternative and is not a World
-Series. Records carry `sws: true`; the series history labels them.
+`S.SR.wsn` is players each per game — 1, 3, 5 or 7 — and becomes `maxRounds`,
+so the rounds setting is ignored either way.
+
+**A World Series game is played face down.** `sealed()` is true for one, and
+`renderGame` then shows no rank, no name, no score and no miss list: a seat
+panel shows ticks for picks made, the plate says only that somebody has picked.
+Showing them as they landed handed the last picker the number to beat, which is
+most of the game at one pick each. `finish` stops at `renderReveal` instead of
+the standings; the turn-over lists everyone's picks with ranks, deepest first,
+and `revealDone` is what actually folds the game into the series. Nothing is
+counted until the room has seen it.
+
+Its end rule, because one-pick games draw often (both strike, or the same
+rank): four wins ends it, or seven games with an outright leader. Level after
+seven is sudden death until somebody leads, capped at 99 like first-to-N-wins.
+A shared title was the alternative and is not a World Series.
+
+**Two of three tying at the top both win** (2026-08-22, owner's direction).
+They have beaten everyone else, so both are credited; only the whole table
+being level is a draw, which still advances nobody — that is the rule that
+stopped a best-of-three finishing 2-2 after two draws, and with two drafters
+nothing has changed. **Total points is the tiebreaker** on wins: `soleLeader`
+reads the standings, which sort by wins then points, so an outright leader is
+one nobody matches on both.
+
+Records carry `sws: true`; the series history labels them.
 
 **A drawn game advances nobody.** The record's own `win` flag marks every top
 scorer, which is right for career stats — but crediting both in a series let a
@@ -544,7 +565,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  587 assertions, no
+  622 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
