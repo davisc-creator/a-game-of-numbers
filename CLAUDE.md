@@ -44,9 +44,12 @@ access token.** Authentication is the owner's to perform. The SSH key at
 ```
 index.html            markup for both games, no logic
 styles.css            all styling; CSS custom properties at :root
-shell.js              game registry, switcher, hash routing
+shell.js              game registry, switcher, hash routing, self-update
+baseball.js           shared by the roster games: season files, league context,
+                      rate formulas, roster shape, the simulation
 app.js                Game 100 — state, data loading, game engine, records
 game1620.js           162-0 — spin, draft, simulation
+league.js             The League — draft an era, play a round robin
 sw.js                 service worker, offline caching
 manifest.webmanifest  PWA metadata
 icon.svg              app icon, numerals drawn as shapes
@@ -56,6 +59,7 @@ tests/run.js          Game 100 suite, no dependencies, not shipped to the page
 tests/run1620.js      162-0 suite
 tests/run-shell.js    both games in one context: load order, switching, id collisions
 tests/run-sw.js       the service worker, against a stub CacheStorage
+tests/run-league.js   The League, drafting from the real season files
 data-teams/<year>.json  one row per player per franchise per season, full stat set
 data-teams/<year>-post.json  postseason equivalent
 data-teams/index.json   franchises, their seasons, and league context per year
@@ -563,9 +567,10 @@ Not requested yet; the owner will direct priorities.
 - Test locally with `python3 -m http.server 8000` — `file://` fails because the
   app fetches JSON.
 - Verify with `node --check app.js` after edits.
-- **Run all four suites before every commit** — `node tests/run.js`,
-  `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  622 assertions, no
+- **Run all five suites before every commit** — `node tests/run.js`,
+  `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
+  `node tests/run-league.js`.
+  670 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -643,6 +648,51 @@ gives the win rate; 162 weighted coin flips give the record. It was chosen for
 explainability, not accuracy. Park factors, platoon splits and defence beyond
 position eligibility are deliberately absent — each adds accuracy and costs more
 explanation than it returns.
+
+## baseball.js, and The League
+
+`baseball.js` is the layer the two roster games sit on: the season files, the
+league context, the rate formulas, the roster shape and the simulation. It
+exists because era normalization is the thing that makes a roster game worth
+playing and there is now more than one of them — duplicating it would let the
+two drift on the one thing they must agree about. What is deliberately *not* in
+it is how each game gathers its players: 162-0 wants one franchise inside a
+rolling decade, the League wants everybody in a span, and those are genuinely
+different queries over the same rows.
+
+**The League** (`league.js`) is two to eight managers drafting from one era.
+The era is chosen rather than spun, everyone who played in it is on one board,
+and the snake draft runs until every manager has the same fifteen-man roster.
+Then a full round robin: every club plays every other the same number of times,
+as close to 162 as divides evenly, and each game is a weighted coin flip.
+
+- **The pool is per player, not per player-and-club.** 162-0 splits a traded man
+  by franchise because there the club is the point; here the era is, so his
+  whole line in the span is one card. One pool, and a man taken is gone.
+- **`headToHead` is symmetric by construction.** Each offence is scaled by the
+  other side's staff ERA−, then the same Pythagorean exponent turns the two run
+  rates into a win chance; swapping the clubs gives one minus the answer, which
+  the suite asserts. Playing everyone against an average opponent instead would
+  have made the schedule meaningless.
+- **A thin era is refused before the draft, not during it.** `shortPositions`
+  checks there are enough men at every real position for the number of
+  managers; with no bench a draft can otherwise dead-end with rosters half
+  filled.
+- **The span is capped at 20 seasons.** A decade is about 0.7 MB and builds in
+  well under a second; twenty is the point where it stops being instant.
+
+**The DH takes any hitter** (2026-08-22). It used to need a man whose most
+common position was DH — but position comes from where somebody actually
+started, and nobody's was DH before the rule existed in 1973, so every earlier
+era was impossible to field. This was latent in 162-0 too and is fixed for both
+in `BB.openSlots`. Every other fielding slot still needs a man who really played
+there.
+
+**Three games now share one global scope**, because they are classic scripts.
+A repeated `const` is a hard load error; a repeated `function` silently wins and
+one game would quietly call the other's. `tests/run-shell.js` asserts every
+top-level name across all five scripts is distinct — it caught `rosterFull`,
+`buildPool` and `renderResults` the day the League was added.
 
 ## The shell
 

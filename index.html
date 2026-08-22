@@ -453,9 +453,90 @@
   </section>
 </div><!-- /game-1620 -->
 
+<div id="game-league" class="hidden">
+  <nav>
+    <button id="l-nav-setup" aria-current="true">New league</button>
+  </nav>
+
+  <section id="l-setup">
+    <div class="card">
+      <h2>Who's managing</h2>
+      <div id="l-seat-list"></div>
+      <button class="btn ghost small" id="l-add-seat">+ Add manager</button>
+      <p class="hint" id="l-seat-note"></p>
+    </div>
+
+    <div class="card">
+      <h2>The era</h2>
+      <p class="hint">Everyone who played inside these years is on the board &mdash; every club, one pool.</p>
+      <div class="years">
+        <label for="l-from">From</label>
+        <input type="number" id="l-from" inputmode="numeric" min="1920" max="2025" value="1970">
+        <span class="dash">to</span>
+        <label for="l-to" class="sr-only">To</label>
+        <input type="number" id="l-to" inputmode="numeric" min="1920" max="2025" value="1979">
+      </div>
+    </div>
+
+    <button class="btn" id="l-start" disabled>Start the draft</button>
+    <p class="hint" id="l-start-note">Loading&hellip;</p>
+  </section>
+
+  <section id="l-draft" class="hidden">
+    <div class="card" style="padding:12px">
+      <div class="row" style="margin-bottom:10px">
+        <div>
+          <div class="eyebrow" style="margin:0" id="l-era">&nbsp;</div>
+          <div id="l-whose" class="big-label"></div>
+        </div>
+        <div class="shrink" style="text-align:right">
+          <div class="eyebrow" style="margin:0">Roster</div>
+          <div id="l-filled" class="big-label"></div>
+        </div>
+        <div class="shrink" style="text-align:right">
+          <div class="eyebrow" style="margin:0">Round</div>
+          <div id="l-round" class="big-label"></div>
+        </div>
+      </div>
+      <input type="text" id="l-search" placeholder="Search a name" autocomplete="off">
+      <div class="pill-set" id="l-filter" style="margin-top:10px"></div>
+      <p class="hint" id="l-count"></p>
+      <p class="hint" id="l-status"></p>
+      <div id="l-cards" class="cards"></div>
+    </div>
+
+    <div class="card">
+      <h2>The league</h2>
+      <div id="l-rosters"></div>
+    </div>
+
+    <button class="btn ghost" id="l-quit">Abandon the draft</button>
+  </section>
+
+  <section id="l-over" class="hidden">
+    <div class="card">
+      <h2 id="l-champ">Final</h2>
+      <p class="hint" id="l-champ-sub"></p>
+      <div id="l-table"></div>
+    </div>
+    <div class="card">
+      <h2>How each club was built</h2>
+      <div id="l-detail"></div>
+    </div>
+    <div class="card">
+      <h2>Head to head</h2>
+      <div class="scroll-x"><div id="l-grid"></div></div>
+      <p class="hint" id="l-how"></p>
+    </div>
+    <button class="btn" id="l-again">New league</button>
+  </section>
+</div><!-- /game-league -->
+
 </div>
 <script src="shell.js"></script>
+<script src="baseball.js"></script>
 <script src="app.js"></script>
 <script src="game1620.js"></script>
+<script src="league.js"></script>
 </body>
 </html>

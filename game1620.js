@@ -19,18 +19,12 @@ const G = {
    position, which is what makes a good shortstop a decision rather than a
    freebie. It also means a spin can come up with nobody you can use - see the
    free respin in renderSpin(). */
-const FIELD = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
-const SLOTS = [
-  ...FIELD.map(p => ({k: p, pos: p, kind: 'bat'})),
-  ...[1, 2, 3].map(i => ({k: 'SP' + i, pos: 'SP', kind: 'pit'})),
-  ...[1, 2].map(i => ({k: 'RP' + i, pos: 'RP', kind: 'pit'})),
-  {k: 'CL', pos: 'CL', kind: 'pit'},
-];
+/* the roster shape, the rate formulas and the simulation live in baseball.js,
+   which the League game shares - see the note at the top of that file */
+const FIELD = BB.FIELD, SLOTS = BB.SLOTS;
 const RESPINS = 3;
 const WINDOW = 10;
-const MIN_AB = 200;      // a card has to represent real playing time for the club
-const MIN_OUTS = 150;    // 50 innings
-const REF_RPG = 4.4;     // runs per game a league-average offence scores
+const MIN_AB = BB.MIN_AB, MIN_OUTS = BB.MIN_OUTS, REF_RPG = BB.REF_RPG;
 
 const $$ = id => document.getElementById(id);
 const esc1 = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -39,32 +33,8 @@ const r3 = n => Math.round(n * 1000) / 1000;
 const pct = n => (n * 1000 < 1000 ? '.' : '') + String(Math.round(n * 1000)).padStart(3, '0');
 
 /* ------------------------------------------------------------------- data */
-async function seasonOf(y){
-  if (!G.files.has(y))
-    G.files.set(y, fetch(`data-teams/${y}.json`).then(r => r.ok ? r.json() : null).catch(() => null));
-  return G.files.get(y);
-}
-
-/* League rates for a window, so a player's line can be made relative to the
-   baseball actually being played around him. */
-function leagueOver(years){
-  const t = {AB: 0, H: 0, X2B: 0, X3B: 0, HR: 0, BB: 0, HBP: 0, SF: 0,
-             ER: 0, IPouts: 0, pHR: 0, pBB: 0, pSO: 0};
-  for (const y of years){
-    const l = G.ix.league[y];
-    if (!l) continue;
-    for (const k of Object.keys(t)) t[k] += l[k] || 0;
-  }
-  const pa = t.AB + t.BB + t.HBP + t.SF;
-  const tb = t.H + t.X2B + 2 * t.X3B + 3 * t.HR;
-  const ip = t.IPouts / 3;
-  return {
-    obp: pa ? (t.H + t.BB + t.HBP) / pa : 0.33,
-    slg: t.AB ? tb / t.AB : 0.4,
-    era: ip ? t.ER * 9 / ip : 4.0,
-    fip: ip ? (13 * t.pHR + 3 * t.pBB - 2 * t.pSO) / ip : 3.2,
-  };
-}
+const seasonOf = y => BB.season(y);
+const leagueOver = years => BB.leagueOver(years);
 
 /* Everyone who played for one franchise inside one window, aggregated. */
 async function roster(franch, y0){
@@ -95,38 +65,13 @@ async function roster(franch, y0){
 
   const hitters = [], arms = [];
   for (const e of bats.values()){
-    const t = e.tot;
-    if (t.AB < MIN_AB) continue;
-    const pa = t.AB + t.BB + t.HBP + t.SF;
-    const tb = t.H + t.X2B + 2 * t.X3B + 3 * t.HR;
-    const obp = pa ? (t.H + t.BB + t.HBP) / pa : 0;
-    const slg = t.AB ? tb / t.AB : 0;
-    hitters.push({
-      id: e.id, name: G.players.n[e.id] || '?', kind: 'bat',
-      pos: Object.entries(e.pos).sort((a, b) => b[1] - a[1])[0][0],
-      pa, ab: t.AB, h: t.H, hr: t.HR, r: t.R, rbi: t.RBI, sb: t.SB, g: t.G,
-      avg: t.AB ? t.H / t.AB : 0, obp, slg,
-      obpP: lg.obp ? obp / lg.obp : 1,
-      slgP: lg.slg ? slg / lg.slg : 1,
-      ops: Math.round(100 * ((lg.obp ? obp / lg.obp : 1) + (lg.slg ? slg / lg.slg : 1) - 1)),
-    });
+    const pos = Object.entries(e.pos).sort((a, b) => b[1] - a[1])[0][0];
+    const c = BB.bat(e.id, e.tot, pos, lg);
+    if (c) hitters.push(c);
   }
   for (const e of pits.values()){
-    const t = e.tot;
-    if (t.IPouts < MIN_OUTS) continue;
-    const ip = t.IPouts / 3;
-    const era = ip ? t.ER * 9 / ip : 99;
-    const fip = ip ? (13 * t.HR + 3 * t.BB - 2 * t.SO) / ip : 9;
-    const starter = t.G ? t.GS / t.G : 0;
-    arms.push({
-      id: e.id, name: G.players.n[e.id] || '?', kind: 'pit',
-      pos: starter > 0.5 ? 'SP' : (t.SV >= 10 ? 'CL' : 'RP'),
-      ip: r1(ip), er: t.ER, so: t.SO, bb: t.BB, w: t.W, l: t.L, sv: t.SV,
-      gs: t.GS, g: t.G, era,
-      whip: ip ? (t.BB + t.H) / ip : 9,
-      eraM: lg.era ? Math.round(100 * era / lg.era) : 100,
-      fipM: lg.fip ? Math.round(100 * fip / lg.fip) : 100,
-    });
+    const c = BB.pit(e.id, e.tot, lg);
+    if (c) arms.push(c);
   }
   hitters.sort((a, b) => b.ops - a.ops);
   arms.sort((a, b) => a.eraM - b.eraM);
@@ -164,15 +109,7 @@ async function doSpin({team = true, era = true} = {}){
 /* ---------------------------------------------------------------- roster */
 const me = () => G.seats[G.turn];
 
-function openSlots(seat, card){
-  return SLOTS.filter(s => {
-    if (seat.roster[s.k]) return false;
-    if (s.kind !== card.kind) return false;
-    if (card.kind === 'bat') return s.pos === card.pos;
-    return s.pos === card.pos || (s.pos === 'RP' && card.pos === 'CL')
-        || (s.pos === 'CL' && card.pos === 'RP');
-  });
-}
+const openSlots = (seat, card) => BB.openSlots(seat.roster, card);
 
 /* Every man already on somebody's roster. The spin rebuilds its card set from
    the season files each time, so without this the same player could be drafted
@@ -227,38 +164,7 @@ async function nextTurn(){
    Team on-base and slugging are taken relative to the leagues the players
    actually played in, multiplied against a reference offence, and turned into
    a record by Pythagorean expectation. Every number below is shown. */
-function simulate(seat){
-  const bats = SLOTS.filter(s => s.kind === 'bat').map(s => seat.roster[s.k]).filter(Boolean);
-  const arms = SLOTS.filter(s => s.kind === 'pit').map(s => seat.roster[s.k]).filter(Boolean);
-
-  const paTot = bats.reduce((a, b) => a + b.pa, 0) || 1;
-  const obpP = bats.reduce((a, b) => a + b.obpP * b.pa, 0) / paTot;
-  const slgP = bats.reduce((a, b) => a + b.slgP * b.pa, 0) / paTot;
-  const rs = REF_RPG * obpP * slgP;
-
-  /* innings split: three starters carry a little over half a short staff */
-  const share = {SP1: .19, SP2: .19, SP3: .18, RP1: .16, RP2: .15, CL: .13};
-  let raM = 0, wsum = 0;
-  for (const s of SLOTS.filter(s => s.kind === 'pit')){
-    const p = seat.roster[s.k]; if (!p) continue;
-    const w = share[s.k] || 0.1;
-    raM += p.eraM * w; wsum += w;
-  }
-  raM = wsum ? raM / wsum : 100;
-  const ra = REF_RPG * raM / 100;
-
-  const ex = 1.83;
-  const wpct = Math.pow(rs, ex) / (Math.pow(rs, ex) + Math.pow(ra, ex));
-
-  let w = 0;
-  const log = [];
-  for (let i = 0; i < 162; i++){ const win = Math.random() < wpct; if (win) w++; log.push(win); }
-
-  let best = 0, run = 0;
-  for (const g of log){ run = g ? run + 1 : 0; best = Math.max(best, run); }
-  return {obpP, slgP, rs, raM, ra, wpct, w, l: 162 - w, streak: best,
-          expW: Math.round(162 * wpct)};
-}
+const simulate = seat => BB.season162(seat.roster);
 
 function finish1620(){
   G.done = true;
@@ -469,10 +375,7 @@ Shell.register({
     renderSeats1620();
     showScreen('setup');
     try{
-      const [ix, players] = await Promise.all([
-        fetch('data-teams/index.json').then(r => r.json()),
-        fetch('data/players.json').then(r => r.json()),
-      ]);
+      const {ix, players} = await BB.load();
       G.ix = ix; G.players = players;
       const n = spinnable().length;
       $$('x-start-note').textContent =

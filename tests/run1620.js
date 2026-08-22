@@ -50,7 +50,7 @@ function load(){
   };
   sandbox.globalThis = sandbox;
   const api = vm.runInNewContext(
-    src + `\n;({G, SLOTS, FIELD, roster, leagueOver, spinnable, simulate, openSlots, take,
+    fs.readFileSync(path.join(ROOT, 'baseball.js'), 'utf8') + '\n' + src + `\n;({G, BB, SLOTS, FIELD, roster, leagueOver, spinnable, simulate, openSlots, take,
              start1620, doSpin, nextTurn, taken, isTaken, WINDOW, MIN_AB, MIN_OUTS, REF_RPG,
              filterOptions, applyFilter})`,
     sandbox, {filename: 'game1620.js'});
@@ -77,6 +77,7 @@ const app = load();
   const ix = JSON.parse(fs.readFileSync(path.join(ROOT, 'data-teams', 'index.json'), 'utf8'));
   const players = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'players.json'), 'utf8'));
   app.G.ix = ix; app.G.players = players;
+  app.BB._set(ix, players);   // the shared layer reads them too
   {
     const years = [];
     for (let y = ix.first; y <= ix.last; y++) years.push(y);
@@ -163,10 +164,13 @@ const app = load();
     eq(app.SLOTS.filter(s => s.pos === 'CL').length, 1, '1 closer');
     eq(app.SLOTS.filter(s => !s.pos).length, 0, 'and no bench — every hitter fits a real position');
     eq(app.SLOTS.map(s => s.k).filter(k => /^BN/.test(k)), [], 'no bench slots survive');
-    ok(['C','1B','2B','3B','SS','LF','CF','RF','DH'].every(p => {
+    ok(['C','1B','2B','3B','SS','LF','CF','RF'].every(p => {
       const f = seat.roster[p];
       return f && f.pos === p;
     }), 'every fielding slot holds a player who actually played there');
+    /* the DH takes any hitter - nobody's primary position was DH before 1973,
+       so requiring one made every earlier era unfieldable */
+    ok(seat.roster.DH && seat.roster.DH.kind === 'bat', 'and the DH holds a hitter, whatever he fielded');
     ok(app.SLOTS.filter(s => s.kind === 'pit').every(s => seat.roster[s.k].kind === 'pit'),
        'no hitters on the pitching staff');
 

@@ -1,8 +1,9 @@
 /* Cache the app shell up front, then any data file the moment it's first used. */
 const SHELL = 'otb-shell-v3';
 const DATA  = 'otb-data-v1';
-const FILES = ['./', './index.html', './styles.css', './shell.js', './app.js',
-               './game1620.js', './manifest.webmanifest', './icon.svg'];
+const FILES = ['./', './index.html', './styles.css', './shell.js', './baseball.js',
+               './app.js', './game1620.js', './league.js',
+               './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

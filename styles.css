@@ -267,3 +267,20 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
 .dv-bar{height:11px;border-radius:1px}
 .dv-bar.mine{background:var(--pole)}
 .dv-bar.theirs{background:var(--rule)}
+
+/* The League: many rosters at once, so each is a compact column rather than
+   the single full-width roster 162-0 shows. */
+.lg-team{border:1px solid var(--rule);background:var(--panel);padding:9px 10px;margin-bottom:8px}
+.lg-team.on{border-color:var(--pole)}
+.lg-nm{font-size:15px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:6px}
+.lg-nm .mono{color:var(--chalk-dim);font-size:12px;letter-spacing:0;text-transform:none}
+.lg-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px}
+.lg-line{border-top:1px solid var(--rule);padding:9px 0}
+.lg-line:first-child{border-top:0}
+.lg-line .mono{font-size:12px;color:var(--chalk-dim);display:block}
+.scroll-x{overflow-x:auto}
+.lg-grid{border-collapse:collapse;font-size:14px;white-space:nowrap}
+.lg-grid th,.lg-grid td{border:1px solid var(--rule);padding:5px 9px;text-align:center}
+.lg-grid thead th{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-dim)}
+.lg-grid tbody th{text-align:left;font-weight:700;font-size:14px}
+.lg-grid td.self{color:var(--chalk-dim);background:rgba(0,0,0,.2)}

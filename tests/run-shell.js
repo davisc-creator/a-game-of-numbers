@@ -52,7 +52,7 @@ sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 
 /* index.html loads them in this order; the shell must not care */
-const ORDER = ['shell.js', 'app.js', 'game1620.js'];
+const ORDER = ['shell.js', 'baseball.js', 'app.js', 'game1620.js', 'league.js'];
 for (const f of ORDER) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, {filename: f});
 
 /* every script tag in index.html must actually exist and be loaded here */
@@ -69,8 +69,8 @@ setTimeout(async () => {
 
   group('registration');
   ok(!!Shell, 'the shell is reachable from the other scripts');
-  ok(Shell.games.length === 2, 'both games registered');
-  ok(Shell.games.map(g => g.id).join() === 'game100,1620', 'in load order');
+  ok(Shell.games.length === 3, 'all three games registered');
+  ok(Shell.games.map(g => g.id).join() === 'game100,1620,league', 'in load order');
   const ids = Shell.games.map(g => g.el);
   ok(new Set(ids).size === ids.length, 'each game owns a distinct element');
 
@@ -100,8 +100,33 @@ setTimeout(async () => {
   const idsOf = src => new Set([...src.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
   const g100 = html.slice(html.indexOf('<div id="game-100">'), html.indexOf('<!-- /game-100 -->'));
   const g1620 = html.slice(html.indexOf('<div id="game-1620"'), html.indexOf('<!-- /game-1620 -->'));
-  for (const id of idsOf(g100)) if (idsOf(g1620).has(id)) collide.push(id);
-  ok(collide.length === 0, 'the two games share no element ids', collide.join(', '));
+  const glg = html.slice(html.indexOf('<div id="game-league"'), html.indexOf('<!-- /game-league -->'));
+  const sets = [['Game 100', idsOf(g100)], ['162-0', idsOf(g1620)], ['League', idsOf(glg)]];
+  for (let i = 0; i < sets.length; i++) for (let j = i + 1; j < sets.length; j++)
+    for (const id of sets[i][1]) if (sets[j][1].has(id)) collide.push(`${sets[i][0]}/${sets[j][0]}: ${id}`);
+  ok(collide.length === 0, 'no two games share an element id', collide.join(', '));
+  ok(idsOf(glg).size > 20, `the League markup is present (${idsOf(glg).size} ids)`);
+
+  group('no top-level name collisions between the scripts');
+  {
+    /* classic scripts share one global scope. A repeated const or let is a hard
+       load error, which is loud - but a repeated function or var silently wins,
+       and one game would quietly call the other's. */
+    const decls = f => {
+      const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const out = new Set();
+      for (const m of src.matchAll(/^(?:const|let|var|function|async function)\s+([A-Za-z_$][\w$]*)/gm))
+        out.add(m[1]);
+      return out;
+    };
+    const seen = new Map(), clash = [];
+    for (const f of ORDER)
+      for (const n of decls(f)){
+        if (seen.has(n)) clash.push(`${n} in both ${seen.get(n)} and ${f}`);
+        else seen.set(n, f);
+      }
+    ok(clash.length === 0, `${seen.size} top-level names across ${ORDER.length} scripts, all distinct`, clash.join('; '));
+  }
 
   group('keeping an installed phone current');
   {

@@ -5,6 +5,7 @@ the browser — no server, no accounts, no build step.
 
 | Game | What it is |
 | --- | --- |
+| **The League** | Two to eight managers draft from one era — every club, one pool — snake order, fifteen players each, then a full round robin decides who would actually have won. |
 | **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players. The top 100 score their rank, 101–125 is a foul, 126 and beyond is a strike — unless you have named the number-one player, which stretches your foul band to 140 for one pick when you are on two strikes. Deep cuts pay more than obvious ones. |
 | **162-0** | Spin a club and a ten-year window, take one of their players, repeat until you have a 15-man roster — nine positions and six arms. Then it plays a season. |
 
