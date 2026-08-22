@@ -83,12 +83,56 @@ function buildMenu(){
   });
 }
 
+/* Keeping an installed phone current. Three things used to leave one on old
+   code for hours after a deploy, with nothing on screen to say so:
+
+   - a home-screen app reopened from the switcher is the same page still in
+     memory, so the new worker installs and nothing reloads;
+   - the worker's network-first fetch still goes through the HTTP cache, which
+     GitHub Pages sets to ten minutes;
+   - there was no way to see which build was running.
+
+   So: check for a new worker every time the app comes back to the foreground,
+   reload as soon as a new one takes control - unless a draft is in progress,
+   in which case offer the reload and leave the game alone - and stamp the
+   rules screen with the build date. */
+const dirty = () => GAMES.some(g => g.booted && g.isDirty && g.isDirty());
+
+function updates(){
+  if (!('serviceWorker' in navigator)) return;
+  let reg = null;
+  navigator.serviceWorker.register('sw.js').then(r => { reg = r; }).catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && reg) reg.update().catch(() => {});
+  });
+  /* the first controller is the first install, not an update */
+  let had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!had){ had = true; return; }
+    if (!dirty()) return location.reload();
+    const n = document.getElementById('update-note');
+    if (n) n.classList.remove('hidden');
+  });
+  const b = document.getElementById('update-go');
+  if (b) b.onclick = () => location.reload();
+}
+
+function stamp(){
+  const el = document.getElementById('build-stamp');
+  if (!el) return;
+  const d = new Date(document.lastModified);
+  el.textContent = isNaN(d) ? '' :
+    `This copy was updated ${d.toLocaleString('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}.`;
+}
+
 function boot(){
   if (!GAMES.length) return;          // nothing registered; nothing to show
   buildMenu();
   const fromHash = () => (location.hash.match(/^#\/([\w-]+)/) || [])[1];
   addEventListener('hashchange', () => go(fromHash(), {push: false}));
   go(fromHash() || GAMES[0].id);
+  updates();
+  stamp();
 }
 
 /* The games register when their own script runs, which is after this one. Both

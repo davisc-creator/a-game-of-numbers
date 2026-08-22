@@ -103,8 +103,51 @@ setTimeout(async () => {
   for (const id of idsOf(g100)) if (idsOf(g1620).has(id)) collide.push(id);
   ok(collide.length === 0, 'the two games share no element ids', collide.join(', '));
 
-  console.log(`\n${'─'.repeat(52)}`);
-  console.log(fail === 0 ? `ALL PASS  — ${pass} assertions` : `${pass} passed, ${fail} FAILED`);
-  if (fail){ console.log(''); failures.forEach(f => console.log(`  ✗ ${f}`)); }
-  process.exit(fail === 0 ? 0 : 1);
+  group('keeping an installed phone current');
+  {
+    /* a second context with a service worker present: the shell registers it,
+       re-checks whenever the app comes back to the foreground, reloads when a
+       new worker takes over - and only offers to when a draft is live */
+    const els2 = new Map();
+    const get2 = id => { if (!els2.has(id)) els2.set(id, el(id)); return els2.get(id); };
+    const docHandlers = {}, swHandlers = {};
+    let reloads = 0, updates = 0;
+    const sb = {...sandbox,
+      document: {getElementById: get2, createElement: () => el('x'), querySelectorAll: () => [],
+                 readyState: 'complete', addEventListener: (t, fn) => { docHandlers[t] = fn; },
+                 visibilityState: 'visible', lastModified: '08/21/2026 19:30:07'},
+      navigator: {serviceWorker: {controller: {}, register: () => Promise.resolve({update: () => { updates++; return Promise.resolve(); }}),
+                                  addEventListener: (t, fn) => { swHandlers[t] = fn; }}},
+      location: {hash: '', origin: '', reload: () => { reloads++; }},
+    };
+    sb.globalThis = sb;
+    const c2 = vm.createContext(sb);
+    for (const f of ORDER) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c2, {filename: f});
+    setTimeout(() => {
+      ok(typeof swHandlers.controllerchange === 'function', 'the shell registers the worker and listens for a new one');
+      docHandlers.visibilitychange();
+      setTimeout(() => {
+        ok(updates === 1, 'coming back to the foreground checks for an update');
+        swHandlers.controllerchange();
+        ok(reloads === 1, 'a new worker taking over reloads the page when nothing is in progress');
+        ok(/updated Aug 21/.test(get2('build-stamp').textContent), `the rules screen says when this copy was built: "${get2('build-stamp').textContent}"`);
+        /* now with a draft in progress */
+        const g100 = vm.runInContext('Shell', c2).games.find(g => g.id === 'game100');
+        g100.isDirty = () => true;
+        swHandlers.controllerchange();
+        ok(reloads === 1, 'with a draft live it does not reload');
+        ok(!get2('update-note')._cls.has('hidden'), 'it offers the reload instead');
+        get2('update-go').onclick();
+        ok(reloads === 2, 'and the offer works');
+        done();
+      }, 20);
+    }, 200);
+  }
+
+  function done(){
+    console.log(`\n${'─'.repeat(52)}`);
+    console.log(fail === 0 ? `ALL PASS  — ${pass} assertions` : `${pass} passed, ${fail} FAILED`);
+    if (fail){ console.log(''); failures.forEach(f => console.log(`  ✗ ${f}`)); }
+    process.exit(fail === 0 ? 0 : 1);
+  }
 }, 2500);

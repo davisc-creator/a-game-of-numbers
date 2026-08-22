@@ -43,7 +43,7 @@ function loadSW(){
   const store = new Map();                       // cacheName -> Map(url -> response)
   const cacheFor = n => store.get(n) || (store.set(n, new Map()), store.get(n));
   let net = () => Promise.reject(new Error('offline'));
-  const netLog = [];
+  const netLog = [], inits = [];
 
   const caches = {
     open: async n => ({
@@ -63,7 +63,7 @@ function loadSW(){
     console, URL, Promise, Map, Set, Array, Object, JSON, Error, RegExp,
     location: {origin: ORIGIN},
     caches,
-    fetch: req => { netLog.push(req.url); return net(req); },
+    fetch: (req, init) => { netLog.push(req.url); inits.push(init || null); return net(req); },
     self: {
       addEventListener: (t, fn) => { handlers[t] = fn; },
       skipWaiting(){}, clients: {claim(){}},
@@ -74,7 +74,7 @@ function loadSW(){
   vm.runInNewContext(src, sandbox, {filename: 'sw.js'});
 
   return {
-    handlers, store, netLog,
+    handlers, store, netLog, inits,
     setNet: fn => { net = fn; },
     seed: (cacheName, url, r) => cacheFor(cacheName).set(url, r),
     cached: (cacheName, url) => (store.get(cacheName) || new Map()).get(url),
@@ -167,6 +167,16 @@ async function main(){
   }
 
   group('the shell is network-first');
+  {
+    /* and revalidates: without cache: 'no-cache' the browser's own HTTP cache
+       answers for ten minutes and the worker never sees the network */
+    const sw = loadSW();
+    sw.setNet(() => Promise.resolve(res(200, 'app')));
+    await sw.get(SHELL_URL);
+    eq(sw.inits[0] && sw.inits[0].cache, 'no-cache', 'a shell fetch revalidates against the server');
+    await sw.get(DATA_URL);
+    eq(sw.inits[1], null, 'a data fetch does not - those files never change');
+  }
   {
     /* the bug that pinned installed browsers to whatever app.js they first saw,
        and that wrote four games' records in a stale shape on 2026-07-28 */

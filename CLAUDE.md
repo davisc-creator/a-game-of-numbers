@@ -484,6 +484,26 @@ landed steps over the bad entry and replaces it. That read-side check is why
 `DATA` did not need a version bump to fix it — bumping would have cost everyone
 their offline eras.
 
+**The app now keeps itself current** (2026-08-22, after a phone sat on old
+code for a day despite the network-first fix). Three things were conspiring and
+each is handled in `shell.js`/`sw.js`, with a test in `tests/run-shell.js`:
+
+- A home-screen app reopened from the switcher is the same page still in
+  memory, so a new worker installed and nothing reloaded. The shell calls
+  `registration.update()` every time the app comes to the foreground, and
+  reloads the moment a new worker takes control — unless a game's `isDirty()`
+  says a draft is live, in which case `#update-note` offers the reload and the
+  game is left alone. The first controller is the first install, not an update,
+  and is ignored.
+- The worker's network-first fetch still went through the browser's HTTP cache,
+  which GitHub Pages sets to ten minutes. Shell fetches now pass
+  `cache: 'no-cache'` — revalidate, not skip; with an ETag the answer is a 304.
+  Data fetches do not, because those files never change.
+- There was no way to see which build was running. The rules screen shows
+  `document.lastModified` as "This copy was updated …"; on Pages that is the
+  deploy time. Registration moved from app.js to the shell, which owns the
+  registry and can ask both games whether anything is in progress.
+
 **A stale worker cannot be fixed from the server.** The 2026-07-28 fix only
 takes effect once the new `sw.js` installs; an installed home-screen app that is
 never fully terminated may never re-check, and stays pinned to the old worker
@@ -524,7 +544,7 @@ Not requested yet; the owner will direct priorities.
 - Verify with `node --check app.js` after edits.
 - **Run all four suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`.
-  578 assertions, no
+  587 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.

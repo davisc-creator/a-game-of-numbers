@@ -2141,7 +2141,7 @@ if (typeof Shell !== 'undefined'){
       }catch(e){
         $('start-note').textContent = 'Could not load the data folder. Serve this over http, not file://';
       }
-      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+      /* the service worker is registered by the shell, which also handles updates */
     },
   });
 }

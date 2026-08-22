@@ -39,8 +39,12 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
+  /* no-cache means revalidate, not skip: the browser's own HTTP cache would
+     otherwise hand back a ten-minute-old app.js without this worker ever
+     seeing the network, which is how a phone stayed on old code after a
+     deploy. With an ETag the usual answer is a 304, so it costs nothing. */
   e.respondWith(
-    fetch(e.request).then(res => keep(SHELL, e.request, res))
+    fetch(e.request, {cache: 'no-cache'}).then(res => keep(SHELL, e.request, res))
       /* the same check on the way out: an entry cached before keep() existed
          could be a 404, and serving that offline would look like the app itself
          is broken. Nothing is a better answer than a lie. */
