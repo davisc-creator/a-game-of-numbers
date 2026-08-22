@@ -1306,7 +1306,7 @@ function renderSeats(){
      screen matters because everything else here is worded for a room. */
   const solo = S.seats.length === 1;
   $('seat-note').textContent = solo
-    ? 'Solo practice \u2014 no opponent, nothing to win, and the game is not counted as a win in your records. Pick "Until you are out" to keep going until three strikes.'
+    ? 'Solo practice \u2014 no opponent, nothing to win, and the game is not counted as a win in your records. Pick "Until you are out" to keep going until three strikes. Add a drafter for a series or the World Series.'
     : 'Use real names \u2014 records track people across games by name.';
   $('rounds-out').textContent = solo ? 'Until you are out' : "Until everyone's out";
   /* a series needs somebody to be ahead of */
