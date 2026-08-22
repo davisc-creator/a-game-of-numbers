@@ -570,7 +570,7 @@ Not requested yet; the owner will direct priorities.
 - **Run all five suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
   `node tests/run-league.js`.
-  670 assertions, no
+  702 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
