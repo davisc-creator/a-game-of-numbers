@@ -42,6 +42,10 @@ function load(){
     document: {getElementById(id){ if (!els.has(id)) els.set(id, stubEl()); return els.get(id); },
                createElement: stubEl, querySelectorAll: () => [], addEventListener(){}},
     window: {}, confirm: () => true, addEventListener(){},
+    localStorage: (() => { const m = new Map(); return {
+      getItem: k => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => m.set(k, String(v)),
+      removeItem: k => m.delete(k), _m: m }; })(),
     Shell: {register(g){ registered = g; }},
     setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout(){},
     fetch: url => {
@@ -57,9 +61,10 @@ function load(){
   const api = vm.runInNewContext(src + `\n;({BB, L, buildLeaguePool, takeL, nextTurnL, fullL,
       available, takenIds, playLeague, shortPositions, finishLeague, renderDraft, rank,
       startLeague, seatEraOf, cleanEra, seasonsNeeded, clubOptions, defaults,
-      renderSeatsL, poolFor, eraKey, boardFor})`,
+      renderSeatsL, poolFor, eraKey, boardFor, saveLeague, showL})`,
     sandbox, {filename: 'league.js'});
   api.__els = els;
+  api.__ls = sandbox.localStorage;
   api.__registered = () => registered;
   return api;
 }
@@ -313,6 +318,104 @@ const app = load();
     eq(app.seasonsNeeded([{y0: 1990, y1: 1999}, {y0: 1995, y1: 2004}]), 15,
        'two overlapping decades share the overlap and cost fifteen, not twenty');
     eq(app.seasonsNeeded([{y0: 1920, y1: 2025}]), 106, 'and all time is the whole set');
+  }
+
+  group('records');
+  {
+    app.BB.clearRecs();
+    eq(app.BB.recs(), [], 'the store starts empty');
+    eq(app.BB.career(), [], 'and so does the career table');
+
+    /* the league just played gets written when it finishes */
+    app.L.saved = false;
+    app.finishLeague();
+    const list = app.BB.recs();
+    eq(list.length, 1, 'finishing a league writes one record');
+    const r = list[0];
+    eq(r.game, 'league', 'tagged as a league');
+    ok(/Eras|Clubs|\d{4}/.test(r.label), `and labelled with the mode: "${r.label}"`);
+    eq(r.players.length, app.L.seats.length, 'a row per manager');
+    ok(r.players.every(p => Number.isInteger(p.w) && Number.isInteger(p.l)), 'each with a record');
+    /* the season is simulated, so two managers can genuinely finish level -
+       and everybody level is a draw that crowns nobody, as everywhere else */
+    const top = Math.max(...r.players.map(p => p.w));
+    const leaders = r.players.filter(p => p.w === top);
+    eq(r.players.filter(p => p.win).length,
+       leaders.length === r.players.length ? 0 : leaders.length,
+       leaders.length === r.players.length
+         ? 'a league that finishes level crowns nobody'
+         : `${leaders.length} champion${leaders.length === 1 ? '' : 's'}, one per club on top`);
+    eq(r.players[0].roster.length, app.BB.SLOTS.length, 'the whole roster is kept');
+    ok(r.players[0].roster.every(x => x.n && x.k && Number.isFinite(x.g)),
+       'with the name, the slot and how good he was');
+    ok(JSON.stringify(r).length < 40000, `and it is small enough to keep (${JSON.stringify(r).length} bytes)`);
+
+    /* it survives a reload, which is the whole point of a records screen */
+    app.BB._resetRecs();
+    eq(app.BB.recs().length, 1, 'and it is still there after a reload');
+  }
+  {
+    /* careers add up across seasons, and a solo season is never a title */
+    app.BB.clearRecs();
+    app.BB.addRec({ts: 1, game: '1620', label: 'a', players: [
+      {name: 'Carson', w: 100, l: 62, rs: 5, ra: 4, win: true, roster: []},
+      {name: 'Bish', w: 80, l: 82, rs: 4, ra: 4, win: false, roster: []}]});
+    app.BB.addRec({ts: 2, game: '1620', label: 'b', players: [
+      {name: 'carson', w: 90, l: 72, rs: 5, ra: 4, win: false, roster: []},
+      {name: 'Bish', w: 95, l: 67, rs: 5, ra: 4, win: true, roster: []}]});
+    app.BB.addRec({ts: 3, game: '1620', label: 'solo', players: [
+      {name: 'Carson', w: 120, l: 42, rs: 6, ra: 3, win: false, roster: []}]});
+    const c = app.BB.career('1620');
+    const carson = c.find(x => /carson/i.test(x.name));
+    eq(carson.seasons, 3, 'three seasons, however the name was capitalised');
+    eq(carson.titles, 1, 'one title');
+    eq(carson.solo, 1, 'and one of them solo, which can never be a title');
+    eq([carson.w, carson.l], [310, 176], 'the win-loss adds up');
+    eq(carson.best, 120, 'and the best season is the best season');
+    ok(Math.abs(carson.pct - 310 / 486) < 1e-9, 'the win rate is over the games actually played');
+
+    /* the two games keep separate tables but one store */
+    app.BB.addRec({ts: 4, game: 'league', label: 'lg', players: [
+      {name: 'Carson', w: 50, l: 50, rs: 5, ra: 5, win: true, roster: []}]});
+    eq(app.BB.career('1620').find(x => /carson/i.test(x.name)).seasons, 3, '162-0 records stay 162-0');
+    eq(app.BB.career('league').find(x => /carson/i.test(x.name)).seasons, 1, 'league records stay league');
+    eq(app.BB.career().find(x => /carson/i.test(x.name)).seasons, 4, 'and a career spans both');
+  }
+  {
+    /* the shapes a store can be in that are not a list of records */
+    app.BB.clearRecs();
+    const ls = app.__ls;
+    for (const bad of ['null', '{}', 'not json', '[1,2]']){
+      ls.setItem(app.BB.REC_KEY, bad);
+      app.BB._resetRecs();
+      ok(Array.isArray(app.BB.recs()), `"${bad.slice(0, 9)}" loads as a list rather than throwing`);
+    }
+    /* import merges by timestamp, so the same file twice is harmless */
+    app.BB.clearRecs();
+    const file = [{ts: 10, game: '1620', label: 'x', players: [{name: 'A', w: 1, l: 1, roster: []}]},
+                  {ts: 11, game: '1620', label: 'y', players: [{name: 'A', w: 2, l: 0, roster: []}]}];
+    eq(app.BB.importRecs(file), 2, 'two records imported');
+    eq(app.BB.importRecs(file), 0, 'and importing the same file again adds nothing');
+    eq(app.BB.recs().length, 2, 'so nothing is duplicated');
+    eq(app.BB.importRecs('rubbish'), 0, 'and rubbish imports nothing');
+  }
+  {
+    /* the screen renders from whatever is in the store */
+    app.BB.clearRecs();
+    app.BB.addRec({ts: 5, game: 'league', label: 'Clubs · Giants v Brewers · 162 games', players: [
+      {name: 'Carson', w: 92, l: 70, rs: 6.1, ra: 4.2, win: true, from: 'San Francisco Giants · 1920–2025',
+       roster: [{k: 'C', n: 'Buster Posey', i: 1, pos: 'C', g: 129, b: true}]},
+      {name: 'Bish', w: 70, l: 92, rs: 4.9, ra: 5.1, win: false, from: 'Milwaukee Brewers · 1969–2025',
+       roster: [{k: 'SP1', n: 'Teddy Higuera', i: 2, pos: 'SP', g: 78, b: false}]}]});
+    app.showL('recs');
+    const career = app.__els.get('l-rec-career').innerHTML;
+    const hist = app.__els.get('l-rec-list').innerHTML;
+    ok(/Carson/.test(career) && /92-70/.test(career), 'the career table shows the manager and his record');
+    ok(/Giants v Brewers/.test(hist), 'the season list names the league');
+    ok(/★ Carson/.test(hist), 'and stars the champion');
+    ok(/Buster Posey/.test(hist) && /129 OPS\+/.test(hist), 'the roster is there with his grade');
+    ok(/Teddy Higuera/.test(hist) && /78 ERA/.test(hist), 'pitchers graded on their own scale');
+    ok(/data-rec="0"/.test(hist), 'and every season opens');
   }
 
   console.log(`\n${'─'.repeat(52)}`);

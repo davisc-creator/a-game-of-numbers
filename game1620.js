@@ -171,15 +171,40 @@ function finish1620(){
   for (const s of G.seats) s.sim = simulate(s);
   const ranked = [...G.seats].sort((a, b) => b.sim.w - a.sim.w || b.sim.wpct - a.sim.wpct);
   G.results = ranked;
+  if (!G.saved){ G.saved = true; saveSeason(ranked); }
   renderResults();
   showScreen('over');
 }
 
+/* One finished season, for the records screen. A solo draft has nobody to
+   beat, so nothing is won - the same rule Game 100's solo practice follows -
+   and everybody level is a draw that advances nobody. */
+function saveSeason(ranked){
+  const top = Math.max(...ranked.map(s => s.sim.w));
+  const leaders = ranked.filter(s => s.sim.w === top);
+  const solo = ranked.length < 2;
+  const drawn = leaders.length === ranked.length;
+  BB.addRec({
+    ts: Date.now(), game: '1620',
+    label: `162-0 · ${ranked.length} manager${ranked.length === 1 ? '' : 's'}`,
+    players: ranked.map(s => ({
+      name: s.name, w: s.sim.w, l: s.sim.l,
+      rs: s.sim.rs, ra: s.sim.ra, raM: s.sim.raM,
+      win: !solo && !drawn && s.sim.w === top,
+      from: Object.values(s.roster)[0] ? Object.values(s.roster)[0].from : '',
+      roster: BB.thin(s.roster),
+    })),
+  });
+}
+
 /* ---------------------------------------------------------------- render */
 function showScreen(name){
-  ['setup', 'draft', 'over'].forEach(s =>
+  ['setup', 'draft', 'over', 'recs'].forEach(s =>
     $$('x-' + s).classList.toggle('hidden', s !== name));
   $$('x-nav-setup').setAttribute('aria-current', String(name === 'setup'));
+  $$('x-nav-recs').setAttribute('aria-current', String(name === 'recs'));
+  if (name === 'recs')
+    BB.renderRecs({career: 'x-rec-career', list: 'x-rec-list', note: 'x-rec-note'}, '1620');
 }
 
 function card(c){
@@ -334,7 +359,8 @@ async function start1620(){
     name: (s.name || '').trim() || `Drafter ${i + 1}`,
     roster: {}, picks: 0, sim: null,
   }));
-  G.turn = 0; G.pos = 0; G.round = 0; G.respinTeam = 0; G.respinEra = 0; G.done = false;
+  G.turn = 0; G.pos = 0; G.round = 0; G.respinTeam = 0; G.respinEra = 0;
+  G.done = false; G.saved = false;
   showScreen('draft');
   await doSpin();
 }
@@ -355,6 +381,11 @@ function wire1620(){
   $$('sx-respin-era').onclick = async () => {
     if (G.respinEra >= RESPINS) return;
     G.respinEra++; await doSpin({team: false, era: true});
+  };
+  $$('x-nav-recs').onclick = () => {
+    if (!G.done && G.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
+    if (G.seats.some(s => s.picks)) G.done = true;
+    showScreen('recs');
   };
   $$('sx-free').onclick = () => doSpin();
   $$('sx-quit').onclick = () => {

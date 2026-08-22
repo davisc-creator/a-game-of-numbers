@@ -570,7 +570,7 @@ Not requested yet; the owner will direct priorities.
 - **Run all five suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
   `node tests/run-league.js`.
-  702 assertions, no
+  749 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -706,6 +706,25 @@ highest-scoring decade every time. This is why the shared layer exists.
   the 1930s is the obvious case; so is four managers on one short-lived club.
 - **A manager's own span is capped at 20 seasons**, except all-time, which is
   the franchise's real span.
+
+**Both roster games keep records**, in `baseball.js` under `agon:rosters` —
+a different key and a different shape from Game 100's `offtheboard:records`,
+which stays exactly where it is. They share the store, the career table and the
+screen renderer because they finish the same way: some managers, a roster each
+and a win-loss record. `BB.renderRecs(ids, game)` takes the three element ids
+each game owns and the game to filter to, so neither grew a copy of it.
+
+- **A career spans both games** when nothing is filtered — a season is a season
+  — while each game's own screen shows only its own. Names merge case-
+  insensitively, as Game 100's do.
+- **`BB.thin` keeps the roster, not the cards.** Name, slot, id and the one
+  grade that matters — a whole league record is about 2.4 KB, where full cards
+  would be a few hundred. "Who did you have?" is the only interesting question
+  about a season from last week, so the roster has to survive.
+- **A solo 162-0 season is never a title**, and everybody finishing level is a
+  draw that crowns nobody. Both are the rules Game 100 already follows.
+- Loading checks the shape (`"null"` and `"{}"` both parse and neither is a
+  list), import merges by `ts`, and the store is capped at 200 seasons.
 
 **The DH takes any hitter** (2026-08-22). It used to need a man whose most
 common position was DH — but position comes from where somebody actually

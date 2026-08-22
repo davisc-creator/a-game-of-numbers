@@ -37,7 +37,10 @@ function load(){
     document: {getElementById(id){ if (!els.has(id)) els.set(id, stubEl()); return els.get(id); },
                createElement: stubEl, querySelectorAll: () => []},
     window: {}, navigator: {}, location: {origin: ''},
-    localStorage: {getItem: () => null, setItem(){}, removeItem(){}},
+    localStorage: (() => { const m = new Map(); return {
+      getItem: k => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => m.set(k, String(v)),
+      removeItem: k => m.delete(k) }; })(),
     setTimeout: fn => { fn(); return 0; }, clearTimeout(){},
     confirm: () => true,
     fetch: url => {
@@ -52,9 +55,10 @@ function load(){
   const api = vm.runInNewContext(
     fs.readFileSync(path.join(ROOT, 'baseball.js'), 'utf8') + '\n' + src + `\n;({G, BB, SLOTS, FIELD, roster, leagueOver, spinnable, simulate, openSlots, take,
              start1620, doSpin, nextTurn, taken, isTaken, WINDOW, MIN_AB, MIN_OUTS, REF_RPG,
-             filterOptions, applyFilter})`,
+             filterOptions, applyFilter, finish1620, showScreen})`,
     sandbox, {filename: 'game1620.js'});
   api.__registered = () => registered;
+  api.__els = els;
   /* top-level function declarations live on the vm's global object, so a test
      can stand in for one - the draft's spin, say - without touching the file */
   api.__sandbox = sandbox;
@@ -282,6 +286,58 @@ const app = load();
     /* Pythagorean, checked against the formula rather than the implementation */
     const want = Math.pow(S.rs, 1.83) / (Math.pow(S.rs, 1.83) + Math.pow(S.ra, 1.83));
     ok(Math.abs(S.wpct - want) < 1e-9, 'win rate is exactly the Pythagorean expectation');
+  }
+
+  group('records');
+  {
+    /* a finished season has to land in the store, or the records screen is a
+       lie - and the roster has to come with it, because "who did you have?" is
+       the only interesting question about a season you played last week */
+    app.BB.clearRecs();
+    const full = () => app.SLOTS.every(x => seat.roster[x.k]);
+    app.G.seats = [{name: 'Carson', roster: {}, picks: 0}, {name: 'Bish', roster: {}, picks: 0}];
+    for (const s of app.G.seats){
+      let g = 0;
+      while (!app.SLOTS.every(x => s.roster[x.k]) && g < 400){
+        const R2 = await app.roster(...app.spinnable()[g * 37 % app.spinnable().length]);
+        g++;
+        const fits = [...R2.hitters, ...R2.arms].find(x => app.openSlots(s, x).length);
+        if (!fits) continue;
+        s.roster[app.openSlots(s, fits)[0].k] = {...fits, from: `${R2.franch} ${R2.y0}–${R2.y1}`};
+        s.picks++;
+      }
+    }
+    void full;
+    app.G.done = false; app.G.saved = false;
+    app.finish1620();
+    const list = app.BB.recs();
+    eq(list.length, 1, 'finishing a season writes one record');
+    eq(list[0].game, '1620', 'tagged as 162-0');
+    eq(list[0].players.length, 2, 'a row per manager');
+    ok(list[0].players.every(p => p.w + p.l === 162), 'each with a full season');
+    /* the season is simulated, so two managers can finish level - and level is
+       a draw that crowns nobody */
+    const top = Math.max(...list[0].players.map(p => p.w));
+    const led = list[0].players.filter(p => p.w === top).length;
+    eq(list[0].players.filter(p => p.win).length, led === list[0].players.length ? 0 : led,
+       led === list[0].players.length ? 'a level season crowns nobody' : 'and one champion');
+    eq(list[0].players[0].roster.length, 15, 'the fifteen-man roster is kept');
+    ok(list[0].players[0].from, 'along with where the first man came from');
+
+    /* solo has nobody to beat */
+    app.G.seats = [app.G.seats[0]];
+    app.G.done = false; app.G.saved = false;
+    app.finish1620();
+    const solo = app.BB.recs()[1];
+    eq(solo.players.length, 1, 'a solo season is recorded');
+    eq(solo.players[0].win, false, 'but nothing is won with nobody to beat');
+    eq(app.BB.career('1620').find(c => c.name === 'Carson').solo, 1, 'and it is counted as solo');
+
+    /* and it renders */
+    app.showScreen('recs');
+    const html = app.__els.get('x-rec-list').innerHTML;
+    ok(/Carson/.test(html), 'the records screen lists the season');
+    ok(/OPS\+|ERA/.test(html), 'with the roster and their grades');
   }
 })().then(() => {
   console.log(`\n${'─'.repeat(52)}`);

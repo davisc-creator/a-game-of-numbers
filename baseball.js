@@ -175,7 +175,149 @@ const BB = (() => {
     return pyth(A, B);
   }
 
+  /* ------------------------------------------------------------ records */
+  /* Both roster games finish the same way: some managers, a roster each and a
+     win-loss record. So they share a store and a screen, and a manager's career
+     spans both - a season is a season. Game 100's records are a different shape
+     and stay where they are, under their own key. */
+  const REC_KEY = 'agon:rosters';
+  let RECS = null;
+
+  function recs(){
+    if (RECS) return RECS;
+    try {
+      const v = JSON.parse(localStorage.getItem(REC_KEY) || '[]');
+      RECS = Array.isArray(v) ? v : [];      // "null" and "{}" both parse
+    } catch (e){ RECS = []; }
+    return RECS;
+  }
+  function saveRecs(){
+    try { localStorage.setItem(REC_KEY, JSON.stringify(RECS)); } catch (e){ /* full or private */ }
+  }
+  /* Trim a roster down to what a record needs: who, where he played and how
+     good he was. Keeping whole cards would be a few hundred KB a league. */
+  const thin = roster => SLOTS.map(sl => {
+    const p = roster[sl.k];
+    return p ? {k: sl.k, n: p.name, i: p.id, pos: p.pos,
+                g: p.kind === 'bat' ? p.ops : p.eraM, b: p.kind === 'bat'} : null;
+  }).filter(Boolean);
+
+  function addRec(rec){
+    recs().push(rec);
+    /* a couple of hundred seasons is plenty of history and keeps this well
+       inside what localStorage will hold */
+    if (RECS.length > 200) RECS = RECS.slice(-200);
+    saveRecs();
+    return rec;
+  }
+  /* Merge by timestamp, exactly as Game 100's import does, so re-importing the
+     same file twice is harmless. */
+  function importRecs(list){
+    if (!Array.isArray(list)) return 0;
+    const have = new Set(recs().map(r => r.ts));
+    const add = list.filter(r => r && Number.isInteger(r.ts) && !have.has(r.ts));
+    RECS = recs().concat(add).sort((a, b) => a.ts - b.ts);
+    saveRecs();
+    return add.length;
+  }
+
+  /* One row per person, across whichever games are asked for. A solo 162-0
+     season has nobody to beat, so it counts as a season played and never as a
+     title - the same rule Game 100's solo practice follows. */
+  function career(game){
+    const m = new Map();
+    for (const r of recs()){
+      if (game && r.game !== game) continue;
+      const solo = (r.players || []).length < 2;
+      for (const p of (r.players || [])){
+        const k = (p.name || '').trim().toLowerCase();
+        if (!k) continue;
+        let e = m.get(k);
+        if (!e){ e = {name: p.name.trim(), seasons: 0, titles: 0, solo: 0,
+                      w: 0, l: 0, best: null, worst: null, rs: 0, ra: 0}; m.set(k, e); }
+        e.seasons++;
+        if (solo) e.solo++;
+        if (p.win) e.titles++;
+        e.w += p.w || 0; e.l += p.l || 0;
+        e.rs += p.rs || 0; e.ra += p.ra || 0;
+        if (e.best == null || (p.w || 0) > e.best) e.best = p.w || 0;
+        if (e.worst == null || (p.w || 0) < e.worst) e.worst = p.w || 0;
+      }
+    }
+    return [...m.values()].map(e => ({...e,
+      pct: (e.w + e.l) ? e.w / (e.w + e.l) : 0,
+      rsAvg: e.seasons ? e.rs / e.seasons : 0,
+      raAvg: e.seasons ? e.ra / e.seasons : 0,
+    })).sort((a, b) => b.titles - a.titles || b.pct - a.pct || b.seasons - a.seasons);
+  }
+
+  /* -------------------------------------------------------- records screen */
+  /* One renderer, two games. Each game owns the three elements and passes their
+     ids in, so neither has to grow a copy of this and the two cannot drift. */
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const pct3 = n => (n < 1 ? '.' : '') + String(Math.round(n * 1000)).padStart(3, '0');
+  const when = ts => new Date(ts).toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+
+  function renderRecs(ids, game){
+    const list = recs().filter(r => !game || r.game === game).slice().reverse();
+    const rows = career(game);
+    const el = id => document.getElementById(id);
+
+    el(ids.career).innerHTML = rows.length ? rows.map((r, i) => `
+      <div class="rec ${i === 0 ? 'lead' : ''}">
+        <div class="rec-head">
+          <div class="nm">${esc(r.name)}</div>
+          <div class="gm">${r.seasons} season${r.seasons === 1 ? '' : 's'} · ${r.titles} won${r.solo ? ` · ${r.solo} solo` : ''}</div>
+        </div>
+        <div class="rec-stats">
+          <div><b>${r.w}-${r.l}</b><span>overall</span></div>
+          <div><b>${pct3(r.pct)}</b><span>win rate</span></div>
+          <div><b>${r.best == null ? '—' : r.best}</b><span>best season</span></div>
+          <div><b>${r.rsAvg.toFixed(2)}</b><span>runs scored</span></div>
+          <div><b>${r.raAvg.toFixed(2)}</b><span>runs allowed</span></div>
+        </div>
+      </div>`).join('')
+      : '<p class="hint">Nothing played yet. Finish a season and it lands here.</p>';
+
+    el(ids.list).innerHTML = list.length ? list.map((r, i) => {
+      const table = [...(r.players || [])].sort((a, b) => (b.w || 0) - (a.w || 0));
+      return `<div class="hist-row">
+        <button class="hist tappable" data-rec="${i}" aria-expanded="false">
+          <div class="top">
+            <div class="cat">${esc(r.label || '')}</div>
+            <div class="when">${when(r.ts)}</div>
+          </div>
+          <div class="line">${table.map(p =>
+            `${p.win ? '★ ' : ''}${esc(p.name)} ${p.w}-${p.l}`).join('   ·   ')}</div>
+        </button>
+        <div class="hist-body hidden" id="${ids.list}-b${i}">
+          ${table.map(p => `
+            <div class="hb-who">${esc(p.name)}
+              <span class="mono">${p.w}-${p.l} · ${p.rs != null ? p.rs.toFixed(2) + ' RS / ' + p.ra.toFixed(2) + ' RA' : ''}${p.from ? ' · ' + esc(p.from) : ''}</span></div>
+            ${(p.roster || []).map(x =>
+              `<div class="gm-pick"><span class="r">${x.k}</span>${esc(x.n)}<span class="tag">${x.g} ${x.b ? 'OPS+' : 'ERA−'}</span></div>`).join('')
+              || '<div class="gm-pick"><span class="r">—</span>roster not recorded</div>'}
+          `).join('')}
+        </div>
+      </div>`;
+    }).join('') : '<p class="hint">No seasons yet.</p>';
+
+    el(ids.list).querySelectorAll('[data-rec]').forEach(b => b.onclick = () => {
+      const body = el(`${ids.list}-b${b.dataset.rec}`);
+      const open = !body.classList.contains('hidden');
+      body.classList.toggle('hidden', open);
+      b.setAttribute('aria-expanded', String(!open));
+    });
+    if (ids.note) el(ids.note).textContent = list.length
+      ? 'Tap any season for the rosters. Records are kept on this device only.'
+      : '';
+  }
+
   return {FIELD, SLOTS, MIN_AB, MIN_OUTS, REF_RPG, PYTH,
+          REC_KEY, recs, addRec, importRecs, career, thin, renderRecs,
+          clearRecs(){ RECS = []; saveRecs(); },
+          /* the suites reload the store to prove it survives one */
+          _resetRecs(){ RECS = null; },
           load, season, leagueOver, nameOf, bat, pit, openSlots,
           strength, pyth, season162, headToHead,
           get ix(){ return ix; }, get players(){ return players; },

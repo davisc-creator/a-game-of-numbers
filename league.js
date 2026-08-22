@@ -201,15 +201,46 @@ function playLeague(seats, games = 162){
 function finishLeague(){
   L.done = true;
   L.results = playLeague(L.seats);
+  if (!L.saved){ L.saved = true; saveLeague(); }
   renderLeagueResults();
   showL('over');
 }
 
+/* One finished league. The mode is part of the label because "Carson 92-70"
+   means a different thing in an all-time Yankees league than in a shared 1970s
+   one, and the records screen has to be able to tell them apart. */
+function saveLeague(){
+  const {table, games} = L.results;
+  const top = table[0].w;
+  const leaders = table.filter(t => t.w === top);
+  const drawn = leaders.length === table.length;
+  const label = L.src === 'club'
+    ? (L.each ? `Clubs · ${L.seats.map(s => clubName(s.club).split(' ').pop()).join(' v ')}`
+              : `${clubName(L.seats[0].club)} · ${L.seats[0].y0}–${L.seats[0].y1}`)
+    : (L.each ? `Eras · ${L.seats.map(s => `${s.y0}–${s.y1}`).join(' v ')}`
+              : `${L.seats[0].y0}–${L.seats[0].y1}`);
+  BB.addRec({
+    ts: Date.now(), game: 'league',
+    label: `${label} · ${games} games`,
+    src: L.src, each: L.each, allTime: L.allTime,
+    players: table.map(t => {
+      const s = L.seats.find(x => x.name === t.name);
+      return {name: t.name, w: t.w, l: t.l, rs: t.rs, ra: t.ra, raM: t.raM,
+              win: !drawn && t.w === top,
+              from: s ? seatSource(s) : '',
+              roster: s ? BB.thin(s.roster) : []};
+    }),
+  });
+}
+
 /* ---------------------------------------------------------------- render */
 function showL(name){
-  ['setup', 'draft', 'over'].forEach(s =>
+  ['setup', 'draft', 'over', 'recs'].forEach(s =>
     $L('l-' + s).classList.toggle('hidden', s !== name));
   $L('l-nav-setup').setAttribute('aria-current', String(name === 'setup'));
+  $L('l-nav-recs').setAttribute('aria-current', String(name === 'recs'));
+  if (name === 'recs')
+    BB.renderRecs({career: 'l-rec-career', list: 'l-rec-list', note: 'l-rec-note'}, 'league');
 }
 
 function cardL(c, fits){
@@ -508,7 +539,8 @@ async function startLeague(){
      something to name when nobody owns an era of their own */
   L.pool = (!L.each && L.src === 'era') ? L.seats[0].pool : null;
   if (!L.each && L.src === 'era') L.seats.forEach(s => { s.pool = L.pool; });
-  L.turn = 0; L.pos = 0; L.round = 0; L.done = false; L.filter = 'all'; L.search = '';
+  L.turn = 0; L.pos = 0; L.round = 0; L.done = false; L.saved = false;
+  L.filter = 'all'; L.search = '';
   showL('draft');
   renderDraft();
 }
@@ -561,6 +593,11 @@ function wireLeague(){
     if (L.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
     L.done = true;
     showL('setup');
+  };
+  $L('l-nav-recs').onclick = () => {
+    if (!L.done && L.seats.some(s => s.picks) && !confirm('Abandon this draft?')) return;
+    if (L.seats.some(s => s.picks)) L.done = true;
+    showL('recs');
   };
   $L('l-search').oninput = e => { L.search = e.target.value; renderDraft(); };
   for (const id of ['l-from', 'l-to'])
