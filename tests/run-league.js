@@ -55,7 +55,9 @@ function load(){
   sandbox.globalThis = sandbox;
   const src = ['baseball.js', 'league.js'].map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
   const api = vm.runInNewContext(src + `\n;({BB, L, buildLeaguePool, takeL, nextTurnL, fullL,
-      available, takenIds, playLeague, shortPositions, finishLeague, renderDraft, rank})`,
+      available, takenIds, playLeague, shortPositions, finishLeague, renderDraft, rank,
+      startLeague, seatEraOf, cleanEra, seasonsNeeded, clubOptions, defaults,
+      renderSeatsL, poolFor, eraKey, boardFor})`,
     sandbox, {filename: 'league.js'});
   api.__els = els;
   api.__registered = () => registered;
@@ -189,6 +191,128 @@ const app = load();
     ok(app.shortPositions(pool.cards, 8).length === 0, 'a full decade is enough for eight');
     /* and the check is what stops a draft that could not finish */
     ok(app.shortPositions([], 2).length > 0, 'an empty era is refused outright');
+  }
+
+  group('one club, or one each');
+  {
+    const clubs = app.clubOptions();
+    ok(clubs.length > 20, `${clubs.length} franchises to choose from`);
+    ok(clubs[0].n >= clubs[clubs.length - 1].n, 'longest-lived first, so the famous clubs are near the top');
+
+    /* a club board really is only that club's men */
+    const sfg = await app.buildLeaguePool(1960, 1979, 'SFG');
+    ok(sfg.cards.length > 20 && sfg.cards.length < 200,
+       `the Giants of 1960-79 are ${sfg.cards.length} players, not the whole era`);
+    eq(sfg.club, 'SFG', 'and the pool says whose it is');
+    const era = await app.buildLeaguePool(1960, 1979);
+    ok(era.cards.length > sfg.cards.length * 5, 'the era pool is far bigger than one club');
+    const ids = new Set(era.cards.map(c => c.kind + ':' + c.id));
+    ok(sfg.cards.every(c => ids.has(c.kind + ':' + c.id)), 'and every Giant is in it');
+    ok(sfg.cards.some(c => /Mays|McCovey|Marichal/.test(c.name)), 'the club board has the men you would expect');
+  }
+
+  group('a cross-club league: the Giants against the Brewers');
+  {
+    app.L.src = 'club'; app.L.each = true; app.L.allTime = true;
+    app.L.seats = [{name: 'A', club: 'SFG'}, {name: 'B', club: 'MIL'}];
+    app.defaults();
+    await app.startLeague();
+    ok(app.L.seats.every(s => s.pool), 'both managers got a board');
+    eq(app.L.seats.map(s => s.pool.club), ['SFG', 'MIL'], 'and each is his own club');
+    /* all time means that franchise's own span, which differs by club */
+    const f = app.BB.ix.franchises;
+    eq([app.L.seats[0].y0, app.L.seats[0].y1], [f.SFG.y0, f.SFG.y1], "all time is the Giants' own span");
+    ok(app.L.seats[1].y0 !== app.L.seats[0].y0 || app.L.seats[1].y1 !== app.L.seats[0].y1
+       || f.MIL.y0 === f.SFG.y0, "and the Brewers' is the Brewers'");
+
+    let guard = 0;
+    while (!app.L.seats.every(app.fullL) && guard++ < 200){
+      const seat = app.L.seats[app.L.turn];
+      const fits = app.available().find(c => app.BB.openSlots(seat.roster, c).length);
+      if (!fits) break;
+      app.takeL(fits);
+    }
+    ok(app.L.seats.every(app.fullL), 'both filled a roster from their own club');
+    /* nobody drafted somebody else's player */
+    for (const s of app.L.seats){
+      const ids = new Set(s.pool.cards.map(c => c.kind + ':' + c.id));
+      const stray = Object.values(s.roster).filter(c => !ids.has(c.kind + ':' + c.id));
+      eq(stray.map(c => c.name), [], `${s.name} drafted only from ${s.pool.club}`);
+    }
+    const r = app.playLeague(app.L.seats);
+    eq(r.table.length, 2, 'and the two clubs played each other');
+    ok(r.table[0].w + r.table[0].l === r.games, 'over a full schedule');
+  }
+
+  group('one club between them is a real scramble');
+  {
+    app.L.src = 'club'; app.L.each = false; app.L.allTime = true;
+    app.L.seats = [{name: 'A', club: 'NYY'}, {name: 'B', club: 'NYY'}];
+    app.defaults();
+    eq(app.L.seats.map(s => s.club), ['NYY', 'NYY'], 'one shared club means one choice for the table');
+    await app.startLeague();
+    ok(app.L.seats.every(s => s.pool), 'both drafting the same Yankees board');
+    eq(app.eraKey(app.L.seats[0].y0, app.L.seats[0].y1, app.L.seats[0].club),
+       app.eraKey(app.L.seats[1].y0, app.L.seats[1].y1, app.L.seats[1].club),
+       'it is literally the same board');
+    let guard = 0;
+    while (!app.L.seats.every(app.fullL) && guard++ < 200){
+      const seat = app.L.seats[app.L.turn];
+      const fits = app.available().find(c => app.BB.openSlots(seat.roster, c).length);
+      if (!fits) break;
+      app.takeL(fits);
+    }
+    ok(app.L.seats.every(app.fullL), 'and there were enough Yankees for both');
+    const all = app.L.seats.flatMap(s => Object.values(s.roster)).map(c => c.kind + ':' + c.id);
+    eq(all.length, new Set(all).size, 'with no man on both rosters — a pick is taken off the other');
+  }
+
+  group('a club too thin to field is refused');
+  {
+    /* the Rays only exist from 1998, so a 1930s window has nobody at all */
+    app.L.src = 'club'; app.L.each = true; app.L.allTime = false;
+    app.L.seats = [{name: 'A', club: 'TBA', y0: 1930, y1: 1939},
+                   {name: 'B', club: 'NYY', y0: 1930, y1: 1939}];
+    app.defaults();
+    /* park the draft screen out of sight so "did not start" means something */
+    app.__els.get('l-draft').classList.add('hidden');
+    await app.startLeague();
+    const note = app.__els.get('l-start-note').textContent;
+    ok(/cannot field/.test(note), `it says so before the draft: "${note}"`);
+    ok(app.__els.get('l-draft')._cls.has('hidden'), 'and the draft never opens');
+  }
+
+  group('own eras, one league');
+  {
+    app.L.src = 'era'; app.L.each = true; app.L.allTime = false;
+    app.L.seats = [{name: 'Ruth', y0: 1927, y1: 1936}, {name: 'Bonds', y0: 1995, y1: 2004}];
+    app.defaults();
+    await app.startLeague();
+    eq(app.L.seats.map(s => [s.y0, s.y1]), [[1927, 1936], [1995, 2004]], 'each manager kept his own decade');
+    ok(app.L.seats[0].pool !== app.L.seats[1].pool, 'and they are different boards');
+    const a = new Set(app.L.seats[0].pool.cards.map(c => c.id));
+    ok(!app.L.seats[1].pool.cards.some(c => a.has(c.id)), 'with nobody in common, seventy years apart');
+    let guard = 0;
+    while (!app.L.seats.every(app.fullL) && guard++ < 200){
+      const seat = app.L.seats[app.L.turn];
+      const fits = app.available().find(c => app.BB.openSlots(seat.roster, c).length);
+      if (!fits) break;
+      app.takeL(fits);
+    }
+    ok(app.L.seats.every(app.fullL), 'both filled a roster out of their own era');
+    /* the whole point: era normalization makes the two comparable */
+    const r = app.playLeague(app.L.seats);
+    ok(r.table.every(t => t.rs > 2 && t.rs < 9),
+       `both clubs score believable runs (${r.table.map(t => t.rs.toFixed(2)).join(' vs ')})`);
+    ok(Math.abs(r.table[0].pct - 0.5) < 0.45, 'and neither era runs away with it on raw numbers');
+  }
+
+  group('what the load actually costs');
+  {
+    eq(app.seasonsNeeded([{y0: 1990, y1: 1999}]), 10, 'a decade is ten season files');
+    eq(app.seasonsNeeded([{y0: 1990, y1: 1999}, {y0: 1995, y1: 2004}]), 15,
+       'two overlapping decades share the overlap and cost fifteen, not twenty');
+    eq(app.seasonsNeeded([{y0: 1920, y1: 2025}]), 106, 'and all time is the whole set');
   }
 
   console.log(`\n${'─'.repeat(52)}`);

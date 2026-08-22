@@ -660,26 +660,52 @@ it is how each game gathers its players: 162-0 wants one franchise inside a
 rolling decade, the League wants everybody in a span, and those are genuinely
 different queries over the same rows.
 
-**The League** (`league.js`) is two to eight managers drafting from one era.
-The era is chosen rather than spun, everyone who played in it is on one board,
-and the snake draft runs until every manager has the same fifteen-man roster.
-Then a full round robin: every club plays every other the same number of times,
-as close to 162 as divides evenly, and each game is a weighted coin flip.
+**The League** (`league.js`) is two to eight managers drafting the same
+fifteen-man roster 162-0 uses, then a full round robin: every club plays every
+other the same number of times, as close to 162 as divides evenly, each game a
+weighted coin flip.
 
+**Two axes, and all four combinations are real games** — `L.src` is `era` or
+`club`, `L.each` is whether everybody shares one or gets his own:
+
+| | shared | one each |
+|---|---|---|
+| **era** | one era, one board, everyone drafting against each other | a decade apiece — Ruth's 1930s against Bonds' 2000s |
+| **club** | one franchise, everybody fighting over its players | the Giants against the Brewers |
+
+`L.allTime` applies to club mode and means that franchise's *own* span, which
+differs per club: the Giants go back to 1920, the Rays to 1998.
+
+**Own-era and cross-club leagues rest entirely on era normalization.** A 150
+OPS+ in 1930 and a 150 OPS+ in 1999 are the same distance above the baseball
+being played around them, which is the only reason clubs from different decades
+can be put on the same field. On raw numbers it would go to whoever picked the
+highest-scoring decade every time. This is why the shared layer exists.
+
+- **The taken set is always global**, whatever the mode. Where two managers'
+  boards overlap they are genuinely drafting against each other, and nobody can
+  end up on two rosters. Where the boards are disjoint — 1927–36 against
+  1995–2004 — nobody is competing and the snake order costs nothing.
 - **The pool is per player, not per player-and-club.** 162-0 splits a traded man
-  by franchise because there the club is the point; here the era is, so his
-  whole line in the span is one card. One pool, and a man taken is gone.
+  by franchise because there the club is the point; in era mode the era is, so
+  his whole line in the span is one card. Club mode filters by franchise on the
+  way in, which is a different query rather than a different aggregation.
+- **Pools are cached by `club:y0-y1`**, so two managers on the same board build
+  it once and overlapping eras share their season files. `seasonsNeeded` counts
+  distinct seasons rather than summing spans, and the setup note reports what
+  the load actually costs — all-time is 106 files and 5.7 MB, once, and the
+  service worker keeps them.
 - **`headToHead` is symmetric by construction.** Each offence is scaled by the
   other side's staff ERA−, then the same Pythagorean exponent turns the two run
   rates into a win chance; swapping the clubs gives one minus the answer, which
   the suite asserts. Playing everyone against an average opponent instead would
   have made the schedule meaningless.
-- **A thin era is refused before the draft, not during it.** `shortPositions`
-  checks there are enough men at every real position for the number of
-  managers; with no bench a draft can otherwise dead-end with rosters half
-  filled.
-- **The span is capped at 20 seasons.** A decade is about 0.7 MB and builds in
-  well under a second; twenty is the point where it stops being instant.
+- **A thin board is refused before the draft, not during it.** `shortPositions`
+  checks every board can field a full roster for *everybody sharing it* — with
+  no bench a draft can otherwise dead-end with rosters half filled. The Rays in
+  the 1930s is the obvious case; so is four managers on one short-lived club.
+- **A manager's own span is capped at 20 seasons**, except all-time, which is
+  the franchise's real span.
 
 **The DH takes any hitter** (2026-08-22). It used to need a man whose most
 common position was DH — but position comes from where somebody actually

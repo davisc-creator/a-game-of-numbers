@@ -460,13 +460,31 @@
 
   <section id="l-setup">
     <div class="card">
+      <h2>What they draft from</h2>
+      <div class="pill-set" id="l-src">
+        <button class="pill" data-lsrc="era" aria-pressed="true">An era</button>
+        <button class="pill" data-lsrc="club">A club</button>
+      </div>
+      <div class="grp-label">Who gets what</div>
+      <div class="pill-set" id="l-each">
+        <button class="pill" data-leach="shared" aria-pressed="true">Everyone shares one</button>
+        <button class="pill" data-leach="each">One each</button>
+      </div>
+      <div class="toggle-row hidden" id="l-alltime-row">
+        <span class="tog-label">Club history</span>
+        <button class="pill" id="l-alltime" aria-pressed="false">All time</button>
+      </div>
+      <p class="hint" id="l-each-note"></p>
+    </div>
+
+    <div class="card">
       <h2>Who's managing</h2>
       <div id="l-seat-list"></div>
       <button class="btn ghost small" id="l-add-seat">+ Add manager</button>
       <p class="hint" id="l-seat-note"></p>
     </div>
 
-    <div class="card">
+    <div class="card" id="l-era-card">
       <h2>The era</h2>
       <p class="hint">Everyone who played inside these years is on the board &mdash; every club, one pool.</p>
       <div class="years">
