@@ -175,6 +175,156 @@ const BB = (() => {
     return pyth(A, B);
   }
 
+  /* ------------------------------------------------- names as people type them */
+  function norm(s){
+    const t = (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[.'\u2019`]/g, '')
+      .replace(/[^a-z\s-]/g, ' ').replace(/-/g, ' ')
+      .replace(/\s+/g, ' ').trim()
+      /* only at the end: a suffix is a suffix. Stripping it anywhere turned
+         "JR Murphy" into "Murphy" and handed the player a different man. */
+      .replace(/ (jr|sr|ii|iii|iv)$/, '');
+    /* Lahman writes initials apart - "C. J. Cron", "A. J. Burnett" - and people
+       type them together. Join runs of two or more single letters so both spellings
+       land in the same bucket. A lone initial is left alone, because "w mays" still
+       has to find Willie Mays. 123 players are written this way. */
+    const out = [];
+    let run = '';
+    for (const w of t.split(' ')){
+      if (w.length === 1) run += w;
+      else { if (run){ out.push(run); run = ''; } out.push(w); }
+    }
+    if (run) out.push(run);
+    return out.join(' ');
+  }
+  const lastOf  = s => { const p = norm(s).split(' '); return p[p.length - 1] || ''; };
+  const firstOf = s => norm(s).split(' ')[0] || '';
+
+  function lev(a, b){
+    if (a === b) return 0;
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    let prev = Array.from({length: n + 1}, (_, i) => i), cur = new Array(n + 1);
+    for (let i = 1; i <= m; i++){
+      cur[0] = i;
+      for (let j = 1; j <= n; j++)
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i-1] === b[j-1] ? 0 : 1));
+      [prev, cur] = [cur, prev];
+    }
+    return prev[n];
+  }
+
+  /* Nicknames Lahman does not carry. Keys are already normalised, so "A-Rod",
+     "a rod" and "ARod" all arrive here as the same string. Only names that are
+     genuinely better known by the nickname earn a place, and only when the
+     nickname points at exactly one man - "Pudge" is Fisk and Rodriguez, "Doc" is
+     Gooden and Halladay, so neither is here. An alias is a spelling shortcut, not
+     a hint: it resolves to a name and that name then scores, fouls or strikes on
+     its own merits like any other. */
+  const ALIASES = {
+    'a rod': 'alex rodriguez', 'arod': 'alex rodriguez',
+    'k rod': 'francisco rodriguez', 'krod': 'francisco rodriguez',
+    'big papi': 'david ortiz', 'papi': 'david ortiz',
+    'charlie hustle': 'pete rose',
+    'mr october': 'reggie jackson',
+    'the babe': 'babe ruth', 'bambino': 'babe ruth', 'sultan of swat': 'babe ruth',
+    'say hey kid': 'willie mays', 'the say hey kid': 'willie mays',
+    'hammerin hank': 'hank aaron', 'hammering hank': 'hank aaron',
+    'the big unit': 'randy johnson', 'big unit': 'randy johnson',
+    'the big hurt': 'frank thomas', 'big hurt': 'frank thomas',
+    'king felix': 'felix hernandez',
+    'joltin joe': 'joe dimaggio', 'yankee clipper': 'joe dimaggio',
+    'the yankee clipper': 'joe dimaggio', 'joltin joe dimaggio': 'joe dimaggio',
+    'splendid splinter': 'ted williams', 'the splendid splinter': 'ted williams',
+    'teddy ballgame': 'ted williams',
+    'stan the man': 'stan musial',
+    'the iron horse': 'lou gehrig', 'iron horse': 'lou gehrig',
+    'the ryan express': 'nolan ryan', 'ryan express': 'nolan ryan',
+    'mr cub': 'ernie banks',
+    'the mick': 'mickey mantle',
+    'the rocket': 'roger clemens', 'rocket': 'roger clemens',
+    'big mac': 'mark mcgwire',
+    'the freak': 'tim lincecum',
+    'crime dog': 'fred mcgriff', 'the crime dog': 'fred mcgriff',
+    'kung fu panda': 'pablo sandoval',
+    'thor': 'noah syndergaard',
+    'el duque': 'orlando hernandez',
+    'hebrew hammer': 'shawn green', 'the hebrew hammer': 'shawn green',
+    'the kid': 'ken griffey', 'junior': 'ken griffey',
+    'the man of steal': 'rickey henderson', 'man of steal': 'rickey henderson',
+    'mad dog': 'greg maddux',
+    'the wizard': 'ozzie smith', 'the wizard of oz': 'ozzie smith',
+    'the big train': 'walter johnson', 'big train': 'walter johnson',
+    'catfish': 'jim hunter',
+    'eck': 'dennis eckersley',
+    'the iron man': 'cal ripken', 'iron man': 'cal ripken',
+    'mr padre': 'tony gwynn',
+    'vlad': 'vladimir guerrero',
+    'miggy': 'miguel cabrera',
+    'the machine': 'albert pujols',
+    'cool papa': 'cool papa bell',
+    'sho': 'shohei ohtani', 'shotime': 'shohei ohtani', 'showtime': 'shohei ohtani',
+    'pops': 'willie stargell',
+  };
+
+  /* Find one man in a list of cards by whatever somebody typed. Zone-free, so
+     it works for any board: The League hands it the manager's own pool. Game
+     100 keeps its own resolver because that one also has to know about the
+     foul band and the strike zone; this is the same matching without the
+     scoring. */
+  function findByName(raw, cards){
+    const q0 = norm(raw);
+    if (!q0) return {k: 'empty'};
+    const q = ALIASES[q0] || q0;
+
+    const byName = new Map(), byLast = new Map(), byFirst = new Map();
+    for (const c of cards){
+      const n = norm(c.name), l = lastOf(c.name), f = firstOf(c.name);
+      (byName.get(n) || byName.set(n, []).get(n)).push(c);
+      (byLast.get(l) || byLast.set(l, []).get(l)).push(c);
+      (byFirst.get(f) || byFirst.set(f, []).get(f)).push(c);
+    }
+    const pick = list => {
+      if (!list || !list.length) return null;
+      /* two different men with the same name is a question only the player can
+         answer, so it is asked rather than guessed */
+      if (list.length > 1) return {k: 'choose', list};
+      return {k: 'hit', card: list[0]};
+    };
+    let r = pick(byName.get(q)); if (r) return r;
+    r = pick(byLast.get(q));     if (r) return r;
+
+    const tok = q.split(' ');
+    if (tok.length === 2){
+      const cand = (byLast.get(tok[1]) || []).filter(c => firstOf(c.name).startsWith(tok[0]))
+        .concat((byLast.get(tok[0]) || []).filter(c => firstOf(c.name).startsWith(tok[1])));
+      r = pick(cand); if (r) return r;
+    }
+    /* a bare first name, but only when it names one man - "Ichiro" */
+    if (tok.length === 1){
+      const one = byFirst.get(q) || [];
+      if (one.length === 1) return {k: 'hit', card: one[0]};
+    }
+
+    /* near misses, drawn from the whole board. Sorted by distance and then
+       alphabetically, never by how good the player is. */
+    const cap = q.length <= 4 ? 1 : q.length <= 7 ? 2 : 3;
+    const near = [];
+    for (const c of cards){
+      const n = norm(c.name);
+      if (n === q) continue;
+      const d = Math.min(lev(q, n), lev(q, lastOf(c.name)), lev(q, firstOf(c.name)));
+      if (d <= cap) near.push({c, d});
+    }
+    if (near.length){
+      near.sort((a, b) => a.d - b.d || (a.c.name < b.c.name ? -1 : 1));
+      /* a crowd at distance nought is a shared first name, not a misspelling */
+      if (!(near[0].d === 0 && near.filter(x => x.d === 0).length > 5))
+        return {k: 'suggest', list: near.slice(0, 5).map(x => x.c)};
+    }
+    return {k: 'none'};
+  }
+
   /* ------------------------------------------------------------ records */
   /* Both roster games finish the same way: some managers, a roster each and a
      win-loss record. So they share a store and a screen, and a manager's career
@@ -314,6 +464,7 @@ const BB = (() => {
   }
 
   return {FIELD, SLOTS, MIN_AB, MIN_OUTS, REF_RPG, PYTH,
+          norm, lastOf, firstOf, lev, ALIASES, findByName,
           REC_KEY, recs, addRec, importRecs, career, thin, renderRecs,
           clearRecs(){ RECS = []; saveRecs(); },
           /* the suites reload the store to prove it survives one */

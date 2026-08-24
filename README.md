@@ -5,7 +5,7 @@ the browser — no server, no accounts, no build step.
 
 | Game | What it is |
 | --- | --- |
-| **The League** | Two to eight managers, fifteen players each, snake order, then a full round robin. Draft from one shared era, or a decade each — Ruth's 1930s against Bonds' 2000s — or from clubs: everybody scrapping over one franchise, or the Giants all-time against the Brewers. Era normalization is what lets clubs from different decades meet. |
+| **The League** | Two to eight managers, fifteen players each, snake order, then a full round robin. You draft by *naming* players from memory — nothing lists who is available; wrong era or wrong club just means pick again, free. Draft from one shared era, or a decade each — Ruth's 1930s against Bonds' 2000s — or from clubs: everybody scrapping over one franchise, or the Giants all-time against the Brewers. Era normalization is what lets clubs from different decades meet. |
 | **Game 100** | Leaderboard snake draft. Pick an era and a stat, take turns naming players. The top 100 score their rank, 101–125 is a foul, 126 and beyond is a strike — unless you have named the number-one player, which stretches your foul band to 140 for one pick when you are on two strikes. Deep cuts pay more than obvious ones. |
 | **Records** | Both roster games keep a history: every season and league you finish, the final table, and the full fifteen-man roster behind it. Managers carry a career across both. |
 | **162-0** | Spin a club and a ten-year window, take one of their players, repeat until you have a 15-man roster — nine positions and six arms. Then it plays a season. |

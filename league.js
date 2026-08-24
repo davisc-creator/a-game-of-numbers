@@ -21,7 +21,7 @@ const L = {
   src: 'era', each: false, allTime: false,
   seats: [], y0: 1970, y1: 1979, pool: null, lg: null,
   turn: 0, pos: 0, round: 0, done: false, results: null,
-  filter: 'all', search: '', sortBy: 'best', loading: false,
+  loading: false,
 };
 
 const MAX_SEATS = 8;
@@ -56,6 +56,14 @@ const $L = id => document.getElementById(id);
 const escL = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pctL = n => (n * 1000 < 1000 ? '.' : '') + String(Math.round(n * 1000)).padStart(3, '0');
 
+/* The seasons a man actually appeared in on this board. It is the only thing
+   the namesake chooser is allowed to show - two men called Willie Mays are
+   told apart by 1951-1973 against 1915-1929, and never by how good they were,
+   which would answer the question the draft is asking. */
+const span = (c, ys) => ys.length
+  ? {...c, y0: Math.min(...ys), y1: Math.max(...ys)}
+  : c;
+
 /* ------------------------------------------------------------------- pool */
 /* Everybody who played in the span, each man's whole line across every club he
    played for. 162-0 splits a player by franchise because there the club is the
@@ -73,7 +81,8 @@ async function buildLeaguePool(y0, y1, club){
       if (club && f.bat.fr[i] !== club) continue;
       const id = f.bat.ids[i];
       let e = bats.get(id);
-      if (!e){ e = {id, pos: {}, tot: {}}; bats.set(id, e); }
+      if (!e){ e = {id, pos: {}, tot: {}, ys: []}; bats.set(id, e); }
+      e.ys.push(f.y);
       f.bat.cols.forEach((c, j) => e.tot[c] = (e.tot[c] || 0) + f.bat.rows[i][j]);
       const p = f.bat.pos[i];
       e.pos[p] = (e.pos[p] || 0) + f.bat.rows[i][f.bat.cols.indexOf('G')];
@@ -82,7 +91,8 @@ async function buildLeaguePool(y0, y1, club){
       if (club && f.pit.fr[i] !== club) continue;
       const id = f.pit.ids[i];
       let e = pits.get(id);
-      if (!e){ e = {id, tot: {}}; pits.set(id, e); }
+      if (!e){ e = {id, tot: {}, ys: []}; pits.set(id, e); }
+      e.ys.push(f.y);
       f.pit.cols.forEach((c, j) => e.tot[c] = (e.tot[c] || 0) + f.pit.rows[i][j]);
     }
   }
@@ -91,11 +101,11 @@ async function buildLeaguePool(y0, y1, club){
   for (const e of bats.values()){
     const pos = Object.entries(e.pos).sort((a, b) => b[1] - a[1])[0][0];
     const c = BB.bat(e.id, e.tot, pos, lg);
-    if (c) cards.push(c);
+    if (c) cards.push(span(c, e.ys));
   }
   for (const e of pits.values()){
     const c = BB.pit(e.id, e.tot, lg);
-    if (c) cards.push(c);
+    if (c) cards.push(span(c, e.ys));
   }
   /* best first, each side on its own index, so "best available" means something */
   cards.sort((a, b) => rank(b) - rank(a));
@@ -147,6 +157,7 @@ function takeL(card){
   }
   seat.roster[slots[0].k] = card;
   seat.picks++;
+  sayL(`${seat.name} takes ${card.name} — ${slots[0].k}, ${card.kind === 'bat' ? card.ops + ' OPS+' : card.eraM + ' ERA−'}.`, 'good');
   nextTurnL();
 }
 
@@ -162,7 +173,6 @@ function nextTurnL(){
     if (L.pos >= n){ L.pos = 0; L.round++; }
     L.turn = L.round % 2 === 0 ? L.pos : n - 1 - L.pos;
   } while (fullL(L.seats[L.turn]) && guard++ < 200);
-  L.search = '';
   const box = $L('l-search'); if (box) box.value = '';
   renderDraft();
 }
@@ -243,19 +253,8 @@ function showL(name){
     BB.renderRecs({career: 'l-rec-career', list: 'l-rec-list', note: 'l-rec-note'}, 'league');
 }
 
-function cardL(c, fits){
-  const line = c.kind === 'bat'
-    ? `<span class="mono">${pctL(c.avg)}/${pctL(c.obp)}/${pctL(c.slg)}</span> <span>${c.hr} HR · ${c.rbi} RBI · ${c.pa} PA</span>`
-    : `<span class="mono">${c.era.toFixed(2)} ERA</span> <span>${c.w}-${c.l} · ${c.so} K · ${c.ip} IP</span>`;
-  const grade = c.kind === 'bat' ? `${c.ops} OPS+` : `${c.eraM} ERA−`;
-  return `<button class="pcard${fits ? '' : ' dim'}"${fits ? '' : ' disabled'} data-id="${c.id}" data-kind="${c.kind}">
-    <div class="pc-top"><span class="pc-pos">${c.pos}</span><span class="pc-nm">${escL(c.name)}</span><span class="pc-gr">${grade}</span></div>
-    <div class="pc-line">${line}</div>
-  </button>`;
-}
-
 /* a spread of decades, so own-era mode opens on something worth playing rather
-   than eight managers all sitting in the same ten years */
+   than every manager sitting in the same ten years */
 const DEFAULT_ERAS = [[1927, 1936], [1995, 2004], [1961, 1970], [1975, 1984],
                       [2010, 2019], [1946, 1955], [1985, 1994], [1998, 2007]];
 const seatEra = i => DEFAULT_ERAS[i % DEFAULT_ERAS.length];
@@ -387,60 +386,123 @@ function cleanEra(s){
   return {y0, y1};
 }
 
-function filterOptionsL(cards, seat){
-  const out = [{k: 'all', label: 'Everyone'}];
-  if (cards.some(c => BB.openSlots(seat.roster, c).length)) out.push({k: 'fits', label: 'Fits a slot'});
-  for (const p of [...BB.FIELD, 'SP', 'RP', 'CL'])
-    if (cards.some(c => c.pos === p)) out.push({k: p, label: p});
-  return out;
-}
-
-function applyFilterL(cards, seat){
-  let out = cards;
-  if (L.filter === 'fits') out = out.filter(c => BB.openSlots(seat.roster, c).length);
-  else if (L.filter !== 'all') out = out.filter(c => c.pos === L.filter);
-  const q = L.search.trim().toLowerCase();
-  if (q) out = out.filter(c => c.name.toLowerCase().includes(q));
-  return out;
-}
-
-const SHOWN = 60;
-
+/* The draft is typed, not browsed. You name a man out of your own head; if he
+   was not in your era, or is gone, or his position is filled, you simply pick
+   again and nothing is charged for it. The difficulty is remembering who played
+   where and when, which is the whole game — so nothing on this screen ever
+   lists who is available, for the same reason Game 100 has no autocomplete. */
 function renderDraft(){
   const seat = meL();
-  const all = available();
   $L('l-era').textContent = (L.each || L.src === 'club')
     ? `${seat.name} · ${seatSource(seat)}`
     : `${L.pool.y0}–${L.pool.y1}`;
-  $L('l-whose').textContent = `${seat.name} on the clock`;
+  $L('l-whose').textContent = seat.name;
   $L('l-filled').textContent = `${seat.picks}/${BB.SLOTS.length}`;
-  $L('l-round').textContent = `${L.round + 1}`;
+  $L('l-round').textContent = String(L.round + 1);
 
-  const opts = filterOptionsL(all, seat);
-  if (!opts.some(o => o.k === L.filter)) L.filter = 'all';
-  $L('l-filter').innerHTML = opts.map(o =>
-    `<button class="pill" data-lf="${o.k}" aria-pressed="${L.filter === o.k}">${o.label}</button>`).join('');
-  $L('l-filter').querySelectorAll('[data-lf]').forEach(el => el.onclick = () => {
-    L.filter = el.dataset.lf; renderDraft();
-  });
-
-  const shown = applyFilterL(all, seat);
+  /* what he still needs: his own roster, which is not a list of candidates */
+  const open = BB.SLOTS.filter(sl => !seat.roster[sl.k]);
+  $L('l-need').textContent = open.length
+    ? `Still to fill — ${open.map(sl => sl.k).join(', ')}`
+    : 'Roster full.';
   $L('l-count').textContent =
-    `${all.length} left ${(L.each || L.src === 'club') ? 'on his board' : 'in the pool'} · showing ${Math.min(shown.length, SHOWN)}${shown.length > SHOWN ? ` of ${shown.length}` : ''}`;
-  $L('l-cards').innerHTML = shown.length
-    ? shown.slice(0, SHOWN).map(c => cardL(c, BB.openSlots(seat.roster, c).length > 0)).join('')
-    : `<p class="hint">${L.search ? 'Nobody by that name is left.' : 'Nobody matches that filter.'}</p>`;
-  $L('l-cards').querySelectorAll('[data-id]').forEach(el => el.onclick = () => {
-    const c = all.find(x => String(x.id) === el.dataset.id && x.kind === el.dataset.kind);
-    if (c) takeL(c);
-  });
+    `${available().length} men left on his board · ${takenIds().size} gone league-wide`;
 
+  renderRostersL();
+  focusL();
+}
+
+const focusL = () => setTimeout(() => { const g = $L('l-guess'); if (g) g.focus(); }, 40);
+const clearAskL = () => { $L('l-ask').innerHTML = ''; };
+const sayL = (t, cls) => { $L('l-status').innerHTML = `<div class="msg ${cls || ''}">${escL(t)}</div>`; };
+
+function submitL(){
+  const raw = $L('l-guess').value;
+  clearAskL();
+  applyL(BB.findByName(raw, boardFor(meL())), raw);
+}
+
+/* Acting on a resolution, split out so a name chosen from a list re-enters the
+   same path rather than duplicating the rules. */
+function applyL(r, raw){
+  const seat = meL();
+  const typed = (raw || '').trim().slice(0, 28);
+  if (r.k === 'empty') return sayL('Type a name first.', 'warn');
+  if (r.k === 'choose')
+    return askL(r.list, `More than one ${r.list[0].name} played. Which?`);
+  if (r.k === 'suggest')
+    return askL(r.list, `No exact match for “${typed}”. Did you mean one of these?`);
+  if (r.k === 'none'){
+    sayL(`${typed || 'That'} isn't on your board — wrong era, wrong club, or short of the playing-time floor. Pick again, it costs nothing.`, 'warn');
+    $L('l-guess').value = ''; return focusL();
+  }
+  const c = r.card;
+  if (takenIds().has(c.kind + ':' + c.id)){
+    const by = L.seats.find(x => Object.values(x.roster).some(p => p.kind === c.kind && p.id === c.id));
+    sayL(`${c.name} is already drafted${by ? ` — ${by.name} has him` : ''}. Pick again.`, 'warn');
+    $L('l-guess').value = ''; return focusL();
+  }
+  if (!BB.openSlots(seat.roster, c).length){
+    sayL(`${c.name} played ${c.pos}, and you have nothing open there. Pick again.`, 'warn');
+    $L('l-guess').value = ''; return focusL();
+  }
+  $L('l-guess').value = '';
+  takeL(c);
+}
+
+/* A short list to choose from. Career span only — never a grade, never a rank —
+   for the same reason Game 100's choosers show none: anything more would answer
+   the question the draft is asking. */
+function askL(list, head){
+  /* the last outcome's message would otherwise sit above the question and read
+     as the answer to it */
+  $L('l-status').innerHTML = '';
+  $L('l-ask').innerHTML = `
+    <div class="msg warn" style="margin-top:10px">
+      <div style="margin-bottom:8px">${escL(head)}</div>
+      <div class="choose">
+        ${list.map((c, i) => `<button class="btn small" data-lpick="${i}">${escL(c.name)}
+          <span class="mono">${c.y0}–${c.y1}</span></button>`).join('')}
+        <button class="btn ghost small" data-lpick="none">None of these</button>
+      </div>
+    </div>`;
+  $L('l-ask').querySelectorAll('[data-lpick]').forEach(el => el.onclick = () => {
+    const v = el.dataset.lpick;
+    clearAskL();
+    if (v === 'none'){ $L('l-guess').value = ''; sayL('Pick again.', 'warn'); return focusL(); }
+    applyL({k: 'hit', card: list[+v]});
+  });
+}
+
+/* Nobody should dead-end a draft because they cannot name a catcher from the
+   1969 Brewers. This fills one open slot with somebody who fits, drawn from the
+   weaker half of the board — so it is always worse than remembering a name, and
+   never worth using twice. */
+function stuckL(){
+  const seat = meL();
+  const fits = available().filter(c => BB.openSlots(seat.roster, c).length);
+  if (!fits.length) return sayL('Nothing left on his board fits an open slot.', 'warn');
+  const weak = fits.slice(Math.floor(fits.length / 2));
+  const c = weak[Math.floor(Math.random() * weak.length)];
+  clearAskL();
+  takeL(c);
+  sayL(`Filled for you: ${c.name}. Naming somebody yourself would have been better.`, 'warn');
+}
+
+/* Everybody's roster, including your own. Your own team is not a list of
+   options, and seeing what the others have taken is half the information in
+   the room - exactly as Game 100 puts the miss list on the game screen. */
+function renderRostersL(){
   $L('l-rosters').innerHTML = L.seats.map((s, i) => `
-    <div class="lg-team${i === L.turn ? ' on' : ''}">
+    <div class="lg-seat${i === L.turn ? ' on' : ''}">
       <div class="lg-nm">${escL(s.name)} <span class="mono">${(L.each || L.src === 'club') ? seatSource(s) + ' · ' : ''}${s.picks}/${BB.SLOTS.length}</span></div>
       <div class="lg-slots">${BB.SLOTS.map(sl => {
         const p = s.roster[sl.k];
-        return `<div class="slot${p ? ' on' : ''}"><span class="k">${sl.k}</span><span class="v">${p ? escL(p.name) : '—'}</span></div>`;
+        return `<div class="slot${p ? ' on' : ''}">
+          <span class="k">${sl.k}</span>
+          <span class="v">${p ? escL(p.name) : '—'}</span>
+          <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : p.eraM + ' ERA−') : ''}</span>
+        </div>`;
       }).join('')}</div>
     </div>`).join('');
 }
@@ -540,7 +602,6 @@ async function startLeague(){
   L.pool = (!L.each && L.src === 'era') ? L.seats[0].pool : null;
   if (!L.each && L.src === 'era') L.seats.forEach(s => { s.pool = L.pool; });
   L.turn = 0; L.pos = 0; L.round = 0; L.done = false; L.saved = false;
-  L.filter = 'all'; L.search = '';
   showL('draft');
   renderDraft();
 }
@@ -599,7 +660,11 @@ function wireLeague(){
     if (L.seats.some(s => s.picks)) L.done = true;
     showL('recs');
   };
-  $L('l-search').oninput = e => { L.search = e.target.value; renderDraft(); };
+  $L('l-submit').onclick = submitL;
+  $L('l-guess').addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); submitL(); }
+  });
+  $L('l-stuck').onclick = stuckL;
   for (const id of ['l-from', 'l-to'])
     $L(id).addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); startLeague(); } });
 }

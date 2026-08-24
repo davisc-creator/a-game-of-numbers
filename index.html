@@ -529,11 +529,16 @@
           <div id="l-round" class="big-label"></div>
         </div>
       </div>
-      <input type="text" id="l-search" placeholder="Search a name" autocomplete="off">
-      <div class="pill-set" id="l-filter" style="margin-top:10px"></div>
+      <p class="hint" id="l-need"></p>
+      <div class="row">
+        <input type="text" id="l-guess" placeholder="Name a player" autocomplete="off"
+               autocapitalize="words" spellcheck="false">
+        <button class="btn shrink" id="l-submit">Draft</button>
+      </div>
+      <div id="l-ask"></div>
+      <div id="l-status"></div>
       <p class="hint" id="l-count"></p>
-      <p class="hint" id="l-status"></p>
-      <div id="l-cards" class="cards"></div>
+      <button class="btn ghost small" id="l-stuck">Stuck — fill this slot for me</button>
     </div>
 
     <div class="card">

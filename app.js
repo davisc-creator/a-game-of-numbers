@@ -20,101 +20,17 @@ let RECORDS = [];
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtVal = v => v == null ? '' : (Number.isInteger(v) ? v.toLocaleString('en-US') : String(v));
+/* Name matching lives in the shared layer: 162-0 and The League need the same
+   accents, initials, suffixes and nicknames, and two copies would drift. */
+const {norm, lastOf, firstOf, lev, ALIASES} = BB;
+
 const ord = n => {
   const s = ['th','st','nd','rd'], v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-function norm(s){
-  const t = (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase().replace(/[.'\u2019`]/g, '')
-    .replace(/[^a-z\s-]/g, ' ').replace(/-/g, ' ')
-    .replace(/\s+/g, ' ').trim()
-    /* only at the end: a suffix is a suffix. Stripping it anywhere turned
-       "JR Murphy" into "Murphy" and handed the player a different man. */
-    .replace(/ (jr|sr|ii|iii|iv)$/, '');
-  /* Lahman writes initials apart - "C. J. Cron", "A. J. Burnett" - and people
-     type them together. Join runs of two or more single letters so both spellings
-     land in the same bucket. A lone initial is left alone, because "w mays" still
-     has to find Willie Mays. 123 players are written this way. */
-  const out = [];
-  let run = '';
-  for (const w of t.split(' ')){
-    if (w.length === 1) run += w;
-    else { if (run){ out.push(run); run = ''; } out.push(w); }
-  }
-  if (run) out.push(run);
-  return out.join(' ');
-}
-const lastOf  = s => { const p = norm(s).split(' '); return p[p.length - 1] || ''; };
-const firstOf = s => norm(s).split(' ')[0] || '';
 
-function lev(a, b){
-  if (a === b) return 0;
-  const m = a.length, n = b.length;
-  if (!m) return n; if (!n) return m;
-  let prev = Array.from({length: n + 1}, (_, i) => i), cur = new Array(n + 1);
-  for (let i = 1; i <= m; i++){
-    cur[0] = i;
-    for (let j = 1; j <= n; j++)
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i-1] === b[j-1] ? 0 : 1));
-    [prev, cur] = [cur, prev];
-  }
-  return prev[n];
-}
 
-/* Nicknames Lahman does not carry. Keys are already normalised, so "A-Rod",
-   "a rod" and "ARod" all arrive here as the same string. Only names that are
-   genuinely better known by the nickname earn a place, and only when the
-   nickname points at exactly one man - "Pudge" is Fisk and Rodriguez, "Doc" is
-   Gooden and Halladay, so neither is here. An alias is a spelling shortcut, not
-   a hint: it resolves to a name and that name then scores, fouls or strikes on
-   its own merits like any other. */
-const ALIASES = {
-  'a rod': 'alex rodriguez', 'arod': 'alex rodriguez',
-  'k rod': 'francisco rodriguez', 'krod': 'francisco rodriguez',
-  'big papi': 'david ortiz', 'papi': 'david ortiz',
-  'charlie hustle': 'pete rose',
-  'mr october': 'reggie jackson',
-  'the babe': 'babe ruth', 'bambino': 'babe ruth', 'sultan of swat': 'babe ruth',
-  'say hey kid': 'willie mays', 'the say hey kid': 'willie mays',
-  'hammerin hank': 'hank aaron', 'hammering hank': 'hank aaron',
-  'the big unit': 'randy johnson', 'big unit': 'randy johnson',
-  'the big hurt': 'frank thomas', 'big hurt': 'frank thomas',
-  'king felix': 'felix hernandez',
-  'joltin joe': 'joe dimaggio', 'yankee clipper': 'joe dimaggio',
-  'the yankee clipper': 'joe dimaggio', 'joltin joe dimaggio': 'joe dimaggio',
-  'splendid splinter': 'ted williams', 'the splendid splinter': 'ted williams',
-  'teddy ballgame': 'ted williams',
-  'stan the man': 'stan musial',
-  'the iron horse': 'lou gehrig', 'iron horse': 'lou gehrig',
-  'the ryan express': 'nolan ryan', 'ryan express': 'nolan ryan',
-  'mr cub': 'ernie banks',
-  'the mick': 'mickey mantle',
-  'the rocket': 'roger clemens', 'rocket': 'roger clemens',
-  'big mac': 'mark mcgwire',
-  'the freak': 'tim lincecum',
-  'crime dog': 'fred mcgriff', 'the crime dog': 'fred mcgriff',
-  'kung fu panda': 'pablo sandoval',
-  'thor': 'noah syndergaard',
-  'el duque': 'orlando hernandez',
-  'hebrew hammer': 'shawn green', 'the hebrew hammer': 'shawn green',
-  'the kid': 'ken griffey', 'junior': 'ken griffey',
-  'the man of steal': 'rickey henderson', 'man of steal': 'rickey henderson',
-  'mad dog': 'greg maddux',
-  'the wizard': 'ozzie smith', 'the wizard of oz': 'ozzie smith',
-  'the big train': 'walter johnson', 'big train': 'walter johnson',
-  'catfish': 'jim hunter',
-  'eck': 'dennis eckersley',
-  'the iron man': 'cal ripken', 'iron man': 'cal ripken',
-  'mr padre': 'tony gwynn',
-  'vlad': 'vladimir guerrero',
-  'miggy': 'miguel cabrera',
-  'the machine': 'albert pujols',
-  'cool papa': 'cool papa bell',
-  'sho': 'shohei ohtani', 'shotime': 'shohei ohtani', 'showtime': 'shohei ohtani',
-  'pops': 'willie stargell',
-};
 
 /* Career span for a pool entry, when players.json happens to be loaded. It is
    the only thing the near-miss chooser is allowed to show alongside a name -

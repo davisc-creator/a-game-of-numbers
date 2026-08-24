@@ -570,7 +570,7 @@ Not requested yet; the owner will direct priorities.
 - **Run all five suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
   `node tests/run-league.js`.
-  749 assertions, no
+  775 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -675,6 +675,31 @@ weighted coin flip.
 
 `L.allTime` applies to club mode and means that franchise's *own* span, which
 differs per club: the Giants go back to 1920, the Rays to 1998.
+
+**The draft is typed, not browsed** (2026-08-23). You name a man out of your
+own head; if he was not in your era or club, or is already gone, or his
+position is filled, you pick again and nothing is charged for it. Nothing on
+the draft screen ever lists who is available — the same rule that keeps Game
+100 free of autocomplete. What it does show is your *own* roster and everyone
+else's, because your team is not a list of options and what the others have
+taken is half the information in the room.
+
+- **Name matching moved into `baseball.js`** — `norm`, `lastOf`, `firstOf`,
+  `lev` and `ALIASES` are shared, and app.js binds them from `BB` so every
+  existing call site and test is untouched. `BB.findByName(raw, cards)` is the
+  zone-free resolver The League uses: exact name, bare last name, first-initial
+  surname, a lone first name that names one man, nicknames, then near misses.
+  Game 100 keeps its own `resolve` because that one also has to know about the
+  foul band and the strike zone; this is the same matching without the scoring.
+- **Cards carry `y0`/`y1`** — the seasons a man actually appeared in on that
+  board. It is the only thing the namesake chooser shows: two men called Willie
+  Mays are told apart by 1951–1972 against 1929, never by how good they were.
+- **`stuckL` is the escape hatch.** Nobody should dead-end a draft because they
+  cannot name a catcher from the 1969 Brewers, so it fills one open slot from
+  the *weaker half* of the board — always worse than remembering somebody, and
+  never worth using twice.
+- A chooser clears the previous outcome's message first, or the last pick's
+  result sits above the question and reads as the answer to it.
 
 **Own-era and cross-club leagues rest entirely on era normalization.** A 150
 OPS+ in 1930 and a 150 OPS+ in 1999 are the same distance above the baseball

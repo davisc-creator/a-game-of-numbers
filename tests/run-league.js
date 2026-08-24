@@ -61,9 +61,12 @@ function load(){
   const api = vm.runInNewContext(src + `\n;({BB, L, buildLeaguePool, takeL, nextTurnL, fullL,
       available, takenIds, playLeague, shortPositions, finishLeague, renderDraft, rank,
       startLeague, seatEraOf, cleanEra, seasonsNeeded, clubOptions, defaults,
-      renderSeatsL, poolFor, eraKey, boardFor, saveLeague, showL})`,
+      renderSeatsL, poolFor, eraKey, boardFor, saveLeague, showL,
+      submitL, applyL, stuckL, renderDraft, meL})`,
     sandbox, {filename: 'league.js'});
   api.__els = els;
+  /* auto-creates, the way document.getElementById does here */
+  api.__el = id => sandbox.document.getElementById(id);
   api.__ls = sandbox.localStorage;
   api.__registered = () => registered;
   return api;
@@ -318,6 +321,112 @@ const app = load();
     eq(app.seasonsNeeded([{y0: 1990, y1: 1999}, {y0: 1995, y1: 2004}]), 15,
        'two overlapping decades share the overlap and cost fifteen, not twenty');
     eq(app.seasonsNeeded([{y0: 1920, y1: 2025}]), 106, 'and all time is the whole set');
+  }
+
+  group('the draft is typed, not browsed');
+  {
+    app.BB.clearRecs();
+    app.L.src = 'club'; app.L.each = true; app.L.allTime = true;
+    app.L.seats = [{name: 'A', club: 'SFG'}, {name: 'B', club: 'MIL'}];
+    app.defaults();
+    await app.startLeague();
+    const type = t => { app.__el('l-guess').value = t; app.submitL(); };
+    const said = () => app.__el('l-status').innerHTML;
+    const seat = app.meL();
+
+    /* nothing on the screen may hint at who is available */
+    app.renderDraft();
+    const screen = ['l-need', 'l-count', 'l-era', 'l-whose', 'l-status']
+      .map(id => app.__els.get(id).textContent + app.__els.get(id).innerHTML).join(' ');
+    const names = seat.pool.cards.slice(0, 400).map(c => c.name);
+    eq(names.filter(n => screen.includes(n)), [], 'the draft screen names nobody who could be drafted');
+    ok(/Still to fill/.test(app.__el('l-need').textContent), 'it says which slots are open — his own roster, not the board');
+    ok(/men left on his board/.test(app.__el('l-count').textContent), 'and how many are left, without saying who');
+
+    /* a man from the right club goes on the roster */
+    const willie = seat.pool.cards.find(c => c.name === 'Willie Mays');
+    ok(willie, 'Willie Mays is a Giant');
+    type('Willie Mays');
+    ok(Object.values(seat.roster).some(p => p.name === 'Willie Mays'), 'naming him drafts him');
+    ok(/takes Willie Mays/.test(said()), `and the screen says so: "${said().replace(/<[^>]*>/g, '')}"`);
+
+    /* a real player who is not on your board is simply a re-pick. Back to the
+       Giants manager first, since Hank Aaron really did play for the Brewers
+       and would have been a legal pick there. */
+    app.L.turn = 0;
+    const before = app.meL().picks;
+    type('Babe Ruth');
+    eq(app.meL().picks, before, 'a man who never played for your club costs you nothing');
+    ok(/isn't on your board/.test(said()), 'and is told why');
+    type('Zzzqqwwx');
+    ok(/isn't on your board/.test(said()), 'nonsense the same');
+    type('');
+    ok(/Type a name first/.test(said()), 'and an empty box just asks again');
+
+    /* and the club really is the boundary: Aaron is a Brewer, not a Giant */
+    ok(!seat.pool.cards.some(c => c.name === 'Hank Aaron'), 'Aaron is not on the Giants board');
+    app.L.turn = 1;
+    ok(app.meL().pool.cards.some(c => c.name === 'Hank Aaron'),
+       'but he is on the Brewers board — he played there in 1975');
+    app.L.turn = 0;
+  }
+  {
+    /* spelling is forgiven the way it is in Game 100 */
+    app.L.turn = 0;
+    app.__el('l-guess').value = 'Willy Mccovey'; app.submitL();
+    const ask = app.__el('l-ask').innerHTML;
+    ok(/data-lpick/.test(ask), 'a misspelling offers a short list');
+    ok(!/OPS|ERA/.test(ask), 'showing career spans only — never a grade, which would answer the question');
+    ok(/McCovey/.test(ask), 'with the man actually meant on it');
+    /* taking the suggestion drafts him */
+    ok(/data-lpick="0"/.test(ask), 'and the first of them is clickable');
+  }
+  {
+    /* two men, one name: told apart by when they played and nothing else */
+    app.L.turn = 0;
+    const board = app.meL().pool.cards;
+    ok(board.every(c => Number.isInteger(c.y0) && Number.isInteger(c.y1) && c.y0 <= c.y1),
+       'every card carries the seasons he actually appeared in');
+    app.__el('l-guess').value = 'Mays'; app.submitL();
+    const ask = app.__el('l-ask').innerHTML;
+    if (/data-lpick="1"/.test(ask)){
+      ok(/\d{4}–\d{4}/.test(ask), 'the namesake chooser shows career spans');
+      ok(!/OPS|ERA/.test(ask), 'and never a grade, which would answer the question');
+    } else {
+      ok(true, 'only one Mays on this board to choose between');
+    }
+    /* a chooser must not sit under a stale message from the last pick */
+    eq(app.__el('l-status').innerHTML, '', 'and the previous outcome is cleared out from under it');
+  }
+  {
+    /* the escape hatch, so a draft cannot dead-end on a slot nobody can name */
+    app.L.turn = 0;
+    const seat = app.meL();
+    const before = seat.picks;
+    const open = app.BB.SLOTS.filter(sl => !seat.roster[sl.k]).length;
+    app.stuckL();
+    eq(seat.picks, before + 1, 'being stuck fills exactly one slot');
+    eq(app.BB.SLOTS.filter(sl => !seat.roster[sl.k]).length, open - 1, 'so there is one fewer to fill');
+    ok(/Filled for you/.test(app.__el('l-status').innerHTML), 'and says it was filled for you');
+    /* drawn from the weaker half, so it is never the smart move */
+    const board = seat.pool.cards;
+    const got = Object.values(seat.roster).slice(-1)[0];
+    ok(board.indexOf(got) >= Math.floor(board.length / 2) - 1,
+       'from the weaker half of the board, so naming somebody yourself always beats it');
+  }
+  {
+    /* a full typed draft, start to finish, naming nobody by hand */
+    app.L.src = 'era'; app.L.each = false; app.L.allTime = false;
+    app.L.y0 = 1990; app.L.y1 = 1999;
+    app.L.seats = [{name: 'A'}, {name: 'B'}];
+    app.defaults();
+    app.__el('l-from').value = '1990'; app.__el('l-to').value = '1999';
+    await app.startLeague();
+    let guard = 0;
+    while (!app.L.seats.every(app.fullL) && guard++ < 200) app.stuckL();
+    ok(app.L.seats.every(app.fullL), 'a draft always completes, even naming nobody');
+    const all = app.L.seats.flatMap(s => Object.values(s.roster)).map(c => c.kind + ':' + c.id);
+    eq(all.length, new Set(all).size, 'with nobody on two rosters');
   }
 
   group('records');

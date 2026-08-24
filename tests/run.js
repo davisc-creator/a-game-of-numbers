@@ -41,7 +41,10 @@ function stubEl(){
 }
 
 function loadApp(){
-  const src = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+  /* index.html loads the shared layer first, and app.js takes its name matching
+     from it, so the suite has to load it the same way */
+  const src = fs.readFileSync(path.join(ROOT, 'baseball.js'), 'utf8') + '\n'
+            + fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
   const store = new Map();
   const timers = [];
   const els = new Map();
