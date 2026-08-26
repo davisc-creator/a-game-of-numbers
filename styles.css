@@ -295,3 +295,12 @@ input[type=text],select{width:100%;background:var(--slot);color:var(--chalk);bor
   border:1px solid var(--rule);border-radius:var(--radius);padding:7px 9px;
   font-family:'Barlow Condensed',sans-serif;font-size:16px}
 .seat-era .dash{color:var(--chalk-dim);font-size:12px;letter-spacing:.14em;text-transform:uppercase;font-weight:700}
+
+/* a roster slot you can move somebody out of */
+.slot.movable{width:100%;text-align:left;background:transparent;border:0;cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif;color:var(--chalk);position:relative}
+.slot.movable:hover .v{color:var(--pole)}
+.slot .mv{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--chalk-dim);
+  font-weight:700;margin-left:6px}
+.lg-nm .tag{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--chalk-dim);
+  border:1px solid var(--rule);padding:0 4px;margin-left:4px}

@@ -597,7 +597,7 @@ Not requested yet; the owner will direct priorities.
 - **Run all five suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
   `node tests/run-league.js`.
-  814 assertions, no
+  850 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -702,6 +702,46 @@ weighted coin flip.
 
 `L.allTime` applies to club mode and means that franchise's *own* span, which
 differs per club: the Giants go back to 1920, the Rays to 1998.
+
+**A man plays where he actually played** (2026-08-23). `BB.positions` keeps
+every position worth `POS_SHARE` (15%) of his games there and at least `POS_MIN`
+(30) outright, and `openSlots` accepts any of them. Bryce Harper is a right
+fielder who has played a fifth of his games at first, and a game that only lets
+him play right is wrong about him; a fortnight of emergency cover behind the
+plate still does not make somebody a catcher. `openSlots` returns his own
+position first, then his others, then the DH — sorting by slot order alone put
+Harper at first base when right was open, which reads as a bug.
+
+**A drafted man can be moved.** Your own slots are buttons when the man in them
+could play somewhere else; `moveSlots` offers every empty slot he is eligible
+for plus any filled one whose occupant could take his, so a straight swap of two
+corner outfielders works. Tap rather than drag, because drag on a phone is
+miserable.
+
+**Computer managers.** `CPU_LEVELS` is three levels, and the level is how deep
+into what fits the computer is willing to reach — an ace takes the best
+available, a rookie takes somebody plausible. It fills its scarcest open
+position first, or the last rounds are spent hunting a catcher nobody has left.
+`runCPUs` runs after every pick so a person never sees a board that is not his
+to act on, guarded by `L.inCPU` against re-entry.
+
+- **A computer keeps no career and beating one is not a title.** `career` skips
+  them entirely and counts a league as solo when it holds fewer than two people,
+  so a league of one person and three computers is practice — the same rule solo
+  play already followed.
+- **Picks accumulate rather than replacing each other.** A person types a name
+  and the computers answer at once; overwriting the line meant you saw somebody
+  else's pick where your own should have been. `L.feed` holds every pick since
+  your turn, yours first. It names only men who have just been drafted, so it is
+  a log of what is gone rather than a list of what is there — the same reason
+  Game 100 shows its miss list, and the suite asserts nobody still available
+  appears on it.
+
+**Stumped, three times a draft.** `stuckL` offers five names at random from
+everybody who fits a slot you still have open — not the best five, and you may
+ignore all of them. Past three it fills a slot from the weaker half rather than
+letting a draft dead-end on a catcher from the 1969 Brewers, so running out has
+a cost.
 
 **The draft is typed, not browsed** (2026-08-23). You name a man out of your
 own head; if he was not in your era or club, or is already gone, or his

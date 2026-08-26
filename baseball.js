@@ -119,14 +119,34 @@ const BB = (() => {
      before the rule existed in 1973, so restricting the slot to DH-primary
      players made every era before then impossible to field. Every other
      fielding slot still needs a man who really played there. */
+  /* Every position a man can be asked to play. Bryce Harper is a right fielder
+     who has played a fifth of his games at first, and a game that only lets him
+     play right is wrong about him. A position qualifies on POS_SHARE of his
+     games there and POS_MIN of them outright, so a fortnight's emergency
+     cover does not make somebody a catcher. */
+  const POS_SHARE = 0.15, POS_MIN = 30;
+  function positions(counts, primary){
+    const tot = Object.values(counts || {}).reduce((a, b) => a + b, 0);
+    const out = new Set([primary]);
+    if (tot) for (const [p, g] of Object.entries(counts))
+      if (g >= POS_MIN && g / tot >= POS_SHARE) out.add(p);
+    return [...out];
+  }
+  const canPlay = (card, pos) => (card.poss || [card.pos]).includes(pos);
+
   function openSlots(roster, card){
-    return SLOTS.filter(s => {
+    const out = SLOTS.filter(s => {
       if (roster[s.k]) return false;
       if (s.kind !== card.kind) return false;
-      if (card.kind === 'bat') return s.pos === card.pos || s.pos === 'DH';
+      if (card.kind === 'bat') return canPlay(card, s.pos) || s.pos === 'DH';
       return s.pos === card.pos || (s.pos === 'RP' && card.pos === 'CL')
           || (s.pos === 'CL' && card.pos === 'RP');
     });
+    /* his own position first, then anywhere else he can play, then the DH. A
+       right fielder who can cover first should land in right when both are
+       open - SLOTS order alone put Harper at first base, which reads as a bug. */
+    const rank = s => s.pos === card.pos ? 0 : s.pos === 'DH' ? 2 : 1;
+    return out.sort((a, b) => rank(a) - rank(b));
   }
 
   /* A roster's runs scored and allowed per game, both relative to a league
@@ -378,8 +398,12 @@ const BB = (() => {
     const m = new Map();
     for (const r of recs()){
       if (game && r.game !== game) continue;
-      const solo = (r.players || []).length < 2;
+      /* a league of computers is not a career, and beating three of them is not
+         beating three people - so a season counts as won only against somebody,
+         and solo means nobody human to beat */
+      const solo = (r.players || []).filter(p => !p.cpu).length < 2;
       for (const p of (r.players || [])){
+        if (p.cpu) continue;                 // computers do not keep a career
         const k = (p.name || '').trim().toLowerCase();
         if (!k) continue;
         let e = m.get(k);
@@ -387,7 +411,9 @@ const BB = (() => {
                       w: 0, l: 0, best: null, worst: null, rs: 0, ra: 0}; m.set(k, e); }
         e.seasons++;
         if (solo) e.solo++;
-        if (p.win) e.titles++;
+        /* beating nobody but computers is not a title, for the same reason a
+           solo season is not one: there was nobody there to beat */
+        if (p.win && !solo) e.titles++;
         e.w += p.w || 0; e.l += p.l || 0;
         e.rs += p.rs || 0; e.ra += p.ra || 0;
         if (e.best == null || (p.w || 0) > e.best) e.best = p.w || 0;
@@ -464,6 +490,7 @@ const BB = (() => {
   }
 
   return {FIELD, SLOTS, MIN_AB, MIN_OUTS, REF_RPG, PYTH,
+          positions, canPlay, POS_SHARE, POS_MIN,
           norm, lastOf, firstOf, lev, ALIASES, findByName,
           REC_KEY, recs, addRec, importRecs, career, thin, renderRecs,
           clearRecs(){ RECS = []; saveRecs(); },

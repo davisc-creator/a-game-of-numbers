@@ -19,6 +19,7 @@ const L = {
        club + shared  one franchise, everybody fighting over its players
        club + each    the Giants against the Brewers, each manager his own club */
   src: 'era', each: false, allTime: false,
+  hintsMax: 3,
   seats: [], y0: 1970, y1: 1979, pool: null, lg: null,
   turn: 0, pos: 0, round: 0, done: false, results: null,
   loading: false,
@@ -101,7 +102,7 @@ async function buildLeaguePool(y0, y1, club){
   for (const e of bats.values()){
     const pos = Object.entries(e.pos).sort((a, b) => b[1] - a[1])[0][0];
     const c = BB.bat(e.id, e.tot, pos, lg);
-    if (c) cards.push(span(c, e.ys));
+    if (c) cards.push({...span(c, e.ys), poss: BB.positions(e.pos, pos)});
   }
   for (const e of pits.values()){
     const c = BB.pit(e.id, e.tot, lg);
@@ -115,6 +116,42 @@ async function buildLeaguePool(y0, y1, club){
 /* One number to sort a mixed board by: how far above average he was, in the
    units each side is already measured in. */
 const rank = c => c.kind === 'bat' ? c.ops - 100 : 100 - c.eraM;
+
+/* ------------------------------------------------------------------- cpu */
+/* A computer manager reaches for the best man who fits, with enough noise that
+   it is not the same league every time. The three levels are how deep into what
+   fits it is willing to look: an ace takes the best available, a rookie takes
+   somebody plausible. Cards are already sorted best-first, so "reach" is a
+   window on the front of the list. */
+const CPU_LEVELS = {
+  rook: {label: 'Rookie',  reach: 12},
+  vet:  {label: 'Veteran', reach: 4},
+  ace:  {label: 'Ace',     reach: 1},
+};
+function cpuPick(seat){
+  const fits = available().filter(c => BB.openSlots(seat.roster, c).length);
+  if (!fits.length) return null;
+  /* fill the hard slots before the easy ones, or the last two rounds are spent
+     hunting a catcher nobody has left */
+  const scarce = {};
+  for (const c of fits) for (const p of (c.poss || [c.pos])) scarce[p] = (scarce[p] || 0) + 1;
+  const need = BB.SLOTS.filter(sl => !seat.roster[sl.k]);
+  const tight = need.slice().sort((a, b) => (scarce[a.pos] || 0) - (scarce[b.pos] || 0))[0];
+  const forTight = tight ? fits.filter(c => BB.openSlots(seat.roster, c).some(sl => sl.k === tight.k)) : [];
+  const list = forTight.length ? forTight : fits;
+  const reach = (CPU_LEVELS[seat.cpu] || CPU_LEVELS.vet).reach;
+  return list[Math.floor(Math.random() * Math.min(reach, list.length))];
+}
+
+/* Let the computer managers take their turns until it is a person's again. */
+function runCPUs(){
+  let guard = 0;
+  while (!L.done && meL() && meL().cpu && guard++ < 400){
+    const c = cpuPick(meL());
+    if (!c) break;
+    takeL(c);
+  }
+}
 
 /* ------------------------------------------------------------------ draft */
 const meL = () => L.seats[L.turn];
@@ -157,8 +194,20 @@ function takeL(card){
   }
   seat.roster[slots[0].k] = card;
   seat.picks++;
-  sayL(`${seat.name} takes ${card.name} — ${slots[0].k}, ${card.kind === 'bat' ? card.ops + ' OPS+' : card.eraM + ' ERA−'}.`, 'good');
+  /* Picks accumulate rather than replacing each other: a person types a name,
+     the computers answer immediately, and overwriting the line meant you saw
+     somebody else's pick where your own should have been. */
+  (L.feed = L.feed || []).push(
+    `${seat.name} takes ${card.name} — ${slots[0].k}, ${card.kind === 'bat' ? card.ops + ' OPS+' : card.eraM + ' ERA−'}.`);
+  showFeed();
   nextTurnL();
+  /* the computer managers take their turns before the screen comes back to a
+     person, so a human never sees a board that is not his to act on */
+  if (!L.inCPU){
+    L.inCPU = true;
+    try { runCPUs(); } finally { L.inCPU = false; }
+    if (!L.done) renderDraft();
+  }
 }
 
 function nextTurnL(){
@@ -224,6 +273,8 @@ function saveLeague(){
   const top = table[0].w;
   const leaders = table.filter(t => t.w === top);
   const drawn = leaders.length === table.length;
+  /* a league with one person in it was not won, however many computers lost */
+  const contested = L.seats.filter(s => !s.cpu).length > 1;
   const label = L.src === 'club'
     ? (L.each ? `Clubs · ${L.seats.map(s => clubName(s.club).split(' ').pop()).join(' v ')}`
               : `${clubName(L.seats[0].club)} · ${L.seats[0].y0}–${L.seats[0].y1}`)
@@ -236,7 +287,7 @@ function saveLeague(){
     players: table.map(t => {
       const s = L.seats.find(x => x.name === t.name);
       return {name: t.name, w: t.w, l: t.l, rs: t.rs, ra: t.ra, raM: t.raM,
-              win: !drawn && t.w === top,
+              win: contested && !drawn && t.w === top, cpu: s ? s.cpu || null : null,
               from: s ? seatSource(s) : '',
               roster: s ? BB.thin(s.roster) : []};
     }),
@@ -266,6 +317,11 @@ function renderSeatsL(){
     <div class="seat">
       <div class="num">${i + 1}</div>
       <input type="text" data-lseat="${i}" value="${escL(s.name || '')}" placeholder="Manager ${i + 1}" maxlength="16">
+      <select data-lcpu="${i}" class="who-sel" aria-label="Manager ${i + 1} is">
+        <option value=""${!s.cpu ? ' selected' : ''}>You</option>
+        ${Object.entries(CPU_LEVELS).map(([k, v]) =>
+          `<option value="${k}"${s.cpu === k ? ' selected' : ''}>CPU · ${v.label}</option>`).join('')}
+      </select>
       ${L.seats.length > 2 ? `<button data-ldrop="${i}" aria-label="Remove manager ${i + 1}">✕</button>` : ''}
     </div>
     ${club && (each || i === 0) ? `<div class="seat-era">
@@ -293,6 +349,14 @@ function renderSeatsL(){
       /* one shared club means one choice for the table */
       if (L.each) L.seats[i].club = e.target.value;
       else L.seats.forEach(x => x.club = e.target.value);
+      renderSeatsL();
+    });
+  $L('l-seat-list').querySelectorAll('[data-lcpu]').forEach(el =>
+    el.onchange = e => {
+      const seat = L.seats[+e.target.dataset.lcpu];
+      seat.cpu = e.target.value || null;
+      if (seat.cpu && !(seat.name || '').trim())
+        seat.name = `${CPU_LEVELS[seat.cpu].label} ${+e.target.dataset.lcpu + 1}`;
       renderSeatsL();
     });
   $L('l-seat-list').querySelectorAll('[data-ldrop]').forEach(el =>
@@ -407,6 +471,12 @@ function renderDraft(){
     : 'Roster full.';
   $L('l-count').textContent =
     `${available().length} men left on his board · ${takenIds().size} gone league-wide`;
+  const bot = !!seat.cpu;
+  $L('l-guess').disabled = bot;
+  $L('l-submit').disabled = bot;
+  $L('l-stuck').disabled = bot;
+  $L('l-stuck').textContent = bot ? 'Stumped'
+    : `Stumped — five who fit (${Math.max(0, L.hintsMax - (seat.hints || 0))} left)`;
 
   renderRostersL();
   focusL();
@@ -414,11 +484,16 @@ function renderDraft(){
 
 const focusL = () => setTimeout(() => { const g = $L('l-guess'); if (g) g.focus(); }, 40);
 const clearAskL = () => { $L('l-ask').innerHTML = ''; };
-const sayL = (t, cls) => { $L('l-status').innerHTML = `<div class="msg ${cls || ''}">${escL(t)}</div>`; };
+const sayL = (t, cls) => { L.feed = []; $L('l-status').innerHTML = `<div class="msg ${cls || ''}">${escL(t)}</div>`; };
+const showFeed = () => {
+  $L('l-status').innerHTML = (L.feed || [])
+    .map((t, i) => `<div class="msg ${i === 0 ? 'good' : ''}">${escL(t)}</div>`).join('');
+};
 
 function submitL(){
   const raw = $L('l-guess').value;
   clearAskL();
+  L.feed = [];
   applyL(BB.findByName(raw, boardFor(meL())), raw);
 }
 
@@ -474,37 +549,109 @@ function askL(list, head){
   });
 }
 
-/* Nobody should dead-end a draft because they cannot name a catcher from the
-   1969 Brewers. This fills one open slot with somebody who fits, drawn from the
-   weaker half of the board — so it is always worse than remembering a name, and
-   never worth using twice. */
+/* Stumped. Three times a draft you may ask for five names that would fit a slot
+   you still have open — not the best five, five at random from everybody who
+   fits, so it is a jog of the memory rather than the answer. You still have to
+   choose, and you may ignore all five and type somebody else.
+
+   Beyond three it still fills a slot rather than letting a draft dead-end,
+   because nobody should be stuck for ever on a catcher from the 1969 Brewers -
+   but it takes somebody from the weaker half, so running out has a cost. */
 function stuckL(){
   const seat = meL();
+  if (seat.cpu) return;
   const fits = available().filter(c => BB.openSlots(seat.roster, c).length);
   if (!fits.length) return sayL('Nothing left on his board fits an open slot.', 'warn');
+
+  if ((seat.hints || 0) < L.hintsMax){
+    seat.hints = (seat.hints || 0) + 1;
+    const five = [];
+    const pool = fits.slice();
+    while (five.length < 5 && pool.length)
+      five.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    renderDraft();
+    askL(five, `Five who would fit, drawn at random — ${L.hintsMax - seat.hints} hint${L.hintsMax - seat.hints === 1 ? '' : 's'} left.`);
+    return;
+  }
   const weak = fits.slice(Math.floor(fits.length / 2));
   const c = weak[Math.floor(Math.random() * weak.length)];
   clearAskL();
   takeL(c);
-  sayL(`Filled for you: ${c.name}. Naming somebody yourself would have been better.`, 'warn');
+  sayL(`Out of hints, so one was filled for you: ${c.name}. Naming somebody yourself would have been better.`, 'warn');
 }
 
 /* Everybody's roster, including your own. Your own team is not a list of
    options, and seeing what the others have taken is half the information in
-   the room - exactly as Game 100 puts the miss list on the game screen. */
+   the room - exactly as Game 100 puts the miss list on the game screen.
+
+   Your own slots are buttons when the man in them could play somewhere else:
+   Bryce Harper is a right fielder who has played a fifth of his games at first,
+   and if you draft him before you have a first baseman you should be able to
+   move him rather than being stuck with where the data filed him. */
 function renderRostersL(){
-  $L('l-rosters').innerHTML = L.seats.map((s, i) => `
-    <div class="lg-seat${i === L.turn ? ' on' : ''}">
-      <div class="lg-nm">${escL(s.name)} <span class="mono">${(L.each || L.src === 'club') ? seatSource(s) + ' · ' : ''}${s.picks}/${BB.SLOTS.length}</span></div>
+  $L('l-rosters').innerHTML = L.seats.map((s, i) => {
+    const mine = i === L.turn && !s.cpu;
+    return `<div class="lg-seat${i === L.turn ? ' on' : ''}">
+      <div class="lg-nm">${escL(s.name)}${s.cpu ? ' <span class="tag">cpu</span>' : ''} <span class="mono">${(L.each || L.src === 'club') ? seatSource(s) + ' · ' : ''}${s.picks}/${BB.SLOTS.length}</span></div>
       <div class="lg-slots">${BB.SLOTS.map(sl => {
         const p = s.roster[sl.k];
-        return `<div class="slot${p ? ' on' : ''}">
-          <span class="k">${sl.k}</span>
+        const movable = mine && p && moveSlots(s, sl.k).length;
+        const body = `<span class="k">${sl.k}</span>
           <span class="v">${p ? escL(p.name) : '—'}</span>
-          <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : p.eraM + ' ERA−') : ''}</span>
-        </div>`;
+          <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : p.eraM + ' ERA−') : ''}</span>`;
+        return movable
+          ? `<button class="slot on movable" data-lmove="${sl.k}" title="Move him">${body}<span class="mv">move</span></button>`
+          : `<div class="slot${p ? ' on' : ''}">${body}</div>`;
       }).join('')}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  $L('l-rosters').querySelectorAll('[data-lmove]').forEach(el =>
+    el.onclick = () => askMoveL(el.dataset.lmove));
+}
+
+/* Where the man in this slot could go instead: any empty slot he is eligible
+   for, plus any filled one whose occupant could take his. A straight swap is
+   the useful case - two outfielders in the wrong corners. */
+function moveSlots(seat, from){
+  const p = seat.roster[from];
+  if (!p) return [];
+  return BB.SLOTS.filter(sl => {
+    if (sl.k === from) return false;
+    if (sl.kind !== p.kind) return false;
+    if (!slotFits(p, sl)) return false;
+    const other = seat.roster[sl.k];
+    return !other || slotFits(other, BB.SLOTS.find(x => x.k === from));
+  });
+}
+const slotFits = (card, sl) => card.kind === 'bat'
+  ? (BB.canPlay(card, sl.pos) || sl.pos === 'DH')
+  : (card.pos === sl.pos || (sl.pos === 'RP' && card.pos === 'CL') || (sl.pos === 'CL' && card.pos === 'RP'));
+
+function askMoveL(from){
+  const seat = meL();
+  const p = seat.roster[from];
+  const to = moveSlots(seat, from);
+  if (!p || !to.length) return;
+  $L('l-status').innerHTML = '';
+  $L('l-ask').innerHTML = `
+    <div class="msg warn" style="margin-top:10px">
+      <div style="margin-bottom:8px">${escL(p.name)} is at ${from}. He can also play:</div>
+      <div class="choose">
+        ${to.map(sl => `<button class="btn small" data-lto="${sl.k}">${sl.k}${seat.roster[sl.k] ? ` <span class="mono">swap with ${escL(seat.roster[sl.k].name)}</span>` : ''}</button>`).join('')}
+        <button class="btn ghost small" data-lto="none">Leave him</button>
+      </div>
+    </div>`;
+  $L('l-ask').querySelectorAll('[data-lto]').forEach(el => el.onclick = () => {
+    const k = el.dataset.lto;
+    clearAskL();
+    if (k === 'none') return focusL();
+    const other = seat.roster[k];
+    seat.roster[k] = p;
+    if (other) seat.roster[from] = other; else delete seat.roster[from];
+    sayL(other ? `${p.name} and ${other.name} swapped.` : `${p.name} moved to ${k}.`, 'good');
+    renderRostersL();
+    focusL();
+  });
 }
 
 function renderLeagueResults(){
@@ -563,6 +710,7 @@ async function startLeague(){
   }
   L.seats = L.seats.map((s, i) => ({
     name: (s.name || '').trim() || `Manager ${i + 1}`,
+    cpu: s.cpu || null, hints: 0,
     club: L.src === 'club' ? s.club : null,
     y0: eras[i].y0, y1: eras[i].y1, roster: {}, picks: 0, pool: null,
   }));
@@ -604,6 +752,11 @@ async function startLeague(){
   L.turn = 0; L.pos = 0; L.round = 0; L.done = false; L.saved = false;
   showL('draft');
   renderDraft();
+  if (meL().cpu){
+    L.inCPU = true;
+    try { runCPUs(); } finally { L.inCPU = false; }
+    if (!L.done) renderDraft();
+  }
 }
 
 /* Positions with fewer qualified men than the league needs. Pitchers are

@@ -62,7 +62,8 @@ function load(){
       available, takenIds, playLeague, shortPositions, finishLeague, renderDraft, rank,
       startLeague, seatEraOf, cleanEra, seasonsNeeded, clubOptions, defaults,
       renderSeatsL, poolFor, eraKey, boardFor, saveLeague, showL,
-      submitL, applyL, stuckL, renderDraft, meL})`,
+      submitL, applyL, stuckL, renderDraft, meL, cpuPick, runCPUs, CPU_LEVELS,
+      moveSlots, askMoveL, renderRostersL})`,
     sandbox, {filename: 'league.js'});
   api.__els = els;
   /* auto-creates, the way document.getElementById does here */
@@ -140,8 +141,10 @@ const app = load();
         const p = s.roster[sl.k];
         if (!p) return true;
         if (sl.kind !== p.kind) return true;
-        /* the DH takes any bat; every other fielding slot needs its own man */
-        if (p.kind === 'bat') return sl.pos !== 'DH' && p.pos !== sl.pos;
+        /* the DH takes any bat; every other fielding slot needs a man who
+           actually played there - which since 2026-08-23 may be any of the
+           positions he played a real share of his games at */
+        if (p.kind === 'bat') return sl.pos !== 'DH' && !app.BB.canPlay(p, sl.pos);
         return !(sl.pos === p.pos || (sl.pos === 'RP' && p.pos === 'CL') || (sl.pos === 'CL' && p.pos === 'RP'));
       });
       eq(bad.map(x => x.k), [], `${s.name}'s roster is legal at every slot`);
@@ -334,9 +337,12 @@ const app = load();
     const said = () => app.__el('l-status').innerHTML;
     const seat = app.meL();
 
-    /* nothing on the screen may hint at who is available */
+    /* nothing that describes the board may hint at who is on it. The pick feed
+       is deliberately excluded and checked separately: it names men who have
+       just been drafted, which is a log of what is gone, not a list of what is
+       there - the same reason Game 100 shows its miss list. */
     app.renderDraft();
-    const screen = ['l-need', 'l-count', 'l-era', 'l-whose', 'l-status']
+    const screen = ['l-need', 'l-count', 'l-era', 'l-whose']
       .map(id => app.__els.get(id).textContent + app.__els.get(id).innerHTML).join(' ');
     const names = seat.pool.cards.slice(0, 400).map(c => c.name);
     eq(names.filter(n => screen.includes(n)), [], 'the draft screen names nobody who could be drafted');
@@ -402,17 +408,35 @@ const app = load();
     /* the escape hatch, so a draft cannot dead-end on a slot nobody can name */
     app.L.turn = 0;
     const seat = app.meL();
+    seat.hints = 0;
     const before = seat.picks;
-    const open = app.BB.SLOTS.filter(sl => !seat.roster[sl.k]).length;
+
+    /* the first three ask for five names rather than filling anything */
     app.stuckL();
-    eq(seat.picks, before + 1, 'being stuck fills exactly one slot');
-    eq(app.BB.SLOTS.filter(sl => !seat.roster[sl.k]).length, open - 1, 'so there is one fewer to fill');
-    ok(/Filled for you/.test(app.__el('l-status').innerHTML), 'and says it was filled for you');
-    /* drawn from the weaker half, so it is never the smart move */
+    eq(seat.picks, before, 'being stumped does not draft anybody for you');
+    eq(seat.hints, 1, 'it spends one of the three hints');
+    const ask = app.__el('l-ask').innerHTML;
+    const five = [...ask.matchAll(/data-lpick="\d+"/g)].length;
+    eq(five, 5, 'and offers five names');
+    ok(/2 hints left/.test(ask), 'saying how many are left');
+    const named = [...ask.matchAll(/data-lpick="\d+">([^<]+)/g)].map(m => m[1].trim());
+    ok(named.every(n => seat.pool.cards.some(c => c.name === n)), 'all of them from his own board');
+    ok(named.every(n => {
+      const c = seat.pool.cards.find(x => x.name === n);
+      return app.BB.openSlots(seat.roster, c).length;
+    }), 'and every one of them fits a slot he still has open');
+
+    app.stuckL(); app.stuckL();
+    eq(seat.hints, 3, 'three hints, and then they are gone');
+
+    /* past three it fills a slot rather than letting a draft dead-end */
     const board = seat.pool.cards;
+    app.stuckL();
+    eq(seat.picks, before + 1, 'out of hints, it fills one instead');
+    ok(/Out of hints/.test(app.__el('l-status').innerHTML), 'and says so');
     const got = Object.values(seat.roster).slice(-1)[0];
     ok(board.indexOf(got) >= Math.floor(board.length / 2) - 1,
-       'from the weaker half of the board, so naming somebody yourself always beats it');
+       'from the weaker half, so running out has a cost');
   }
   {
     /* a full typed draft, start to finish, naming nobody by hand */
@@ -429,13 +453,142 @@ const app = load();
     eq(all.length, new Set(all).size, 'with nobody on two rosters');
   }
 
+  group('a man plays where he actually played');
+  {
+    /* Bryce Harper is a right fielder who has played a fifth of his games at
+       first, and a game that only lets him play right is wrong about him */
+    eq(app.BB.positions({RF: 926, '1B': 277, DH: 225, LF: 218, CF: 139}, 'RF'), ['RF', '1B'],
+       'Harper is eligible in right and at first');
+    eq(app.BB.positions({SS: 400, C: 12}, 'SS'), ['SS'],
+       'a fortnight of emergency cover behind the plate does not make him a catcher');
+    eq(app.BB.positions({}, 'CF'), ['CF'], 'and a man with no split just plays his own position');
+
+    const harper = {kind: 'bat', pos: 'RF', poss: ['RF', '1B'], name: 'H'};
+    const keys = k => app.BB.openSlots({}, k).map(s => s.k);
+    /* his own position leads: slot order alone put a right fielder at first
+       base when both were open, which reads as a bug */
+    eq(keys(harper), ['RF', '1B', 'DH'], 'his own position first, then the other, then the DH');
+    eq(keys({kind: 'bat', pos: 'RF', name: 'X'}), ['RF', 'DH'], 'a pure right fielder gets two');
+    ok(app.BB.canPlay(harper, '1B') && !app.BB.canPlay(harper, 'SS'), 'and he is not a shortstop');
+  }
+  {
+    /* moving a man you have already drafted */
+    app.L.src = 'era'; app.L.each = false; app.L.allTime = false;
+    app.L.y0 = 2012; app.L.y1 = 2025;
+    app.L.seats = [{name: 'A'}, {name: 'B'}];
+    app.defaults();
+    app.__el('l-from').value = '2012'; app.__el('l-to').value = '2025';
+    await app.startLeague();
+    const seat = app.meL();
+    const h = seat.pool.cards.find(c => c.name === 'Bryce Harper');
+    ok(h, 'Harper is in a 2012-2025 board');
+    eq(h.poss.slice().sort(), ['1B', 'RF'], 'carrying both his positions');
+
+    seat.roster.RF = h; seat.picks = 1;
+    const to = app.moveSlots(seat, 'RF').map(x => x.k);
+    ok(to.includes('1B'), 'from right field he can be moved to first');
+    ok(to.includes('DH'), 'or to the DH slot');
+    ok(!to.includes('SS'), 'but not to short');
+
+    /* a straight swap, which is the useful case */
+    const cf = seat.pool.cards.find(c => c.pos === 'CF' && c.name !== h.name);
+    seat.roster.CF = cf; seat.picks = 2;
+    const rf = app.moveSlots(seat, 'CF').map(x => x.k);
+    ok(!rf.includes('RF') || app.BB.canPlay(h, 'CF'),
+       'a swap is only offered when the other man could take the slot being left');
+
+    /* and it actually moves */
+    app.renderRostersL();
+    app.askMoveL('RF');
+    const ask = app.__el('l-ask').innerHTML;
+    ok(/data-lto="1B"/.test(ask), 'the mover offers first base');
+    ok(/Bryce Harper is at RF/.test(ask), "and says who is being moved");
+  }
+
+  group('computer managers');
+  {
+    eq(Object.keys(app.CPU_LEVELS), ['rook', 'vet', 'ace'], 'three levels');
+    app.L.src = 'era'; app.L.each = false; app.L.allTime = false;
+    app.L.y0 = 1995; app.L.y1 = 2004;
+    app.L.seats = [{name: 'You'}, {name: 'Ace', cpu: 'ace'}, {name: 'Rook', cpu: 'rook'}];
+    app.defaults();
+    app.__el('l-from').value = '1995'; app.__el('l-to').value = '2004';
+    await app.startLeague();
+    /* the computers took their turns before the board came back to a person */
+    eq(app.meL().name, 'You', 'the draft opens on the person, who is first in the order');
+    ok(app.__el('l-guess').disabled === false, 'so the box is live');
+    /* once the person picks, both computers take their turns before it comes
+       back to him - he never sees a board that is not his to act on */
+    const first = app.available().find(c => app.BB.openSlots(app.meL().roster, c).length);
+    app.L.feed = [];
+    app.takeL(first);
+    eq(app.meL().name, 'You', 'after his pick it is his turn again');
+    ok(app.L.seats[1].picks > 0 && app.L.seats[2].picks > 0,
+       'because both computers went in between');
+    /* his own pick still leads: the computers answering used to overwrite the
+       line, so you saw somebody else's pick where yours should have been */
+    const feed = app.__els.get('l-status').innerHTML;
+    const blocks = feed.split('<div class="msg').slice(1);
+    ok(blocks.length > 1, `every pick since his turn is shown (${blocks.length})`);
+    ok(blocks[0].includes(first.name) && blocks[0].includes('You takes'),
+       'his own pick leads the list');
+    ok(blocks.slice(1).some(b => /Ace takes|Rook takes/.test(b)),
+       'with the computers underneath it');
+    /* and the feed is a log, not a leak: nobody still available is on it */
+    ok(!app.available().some(c => feed.includes(c.name)),
+       'and it names nobody who could still be drafted');
+
+    /* an ace reaches shallower into the board than a rookie */
+    const seat = app.L.seats[1];
+    const depth = (level, n) => {
+      const s2 = {...seat, cpu: level, roster: {}, picks: 0};
+      let sum = 0;
+      for (let i = 0; i < n; i++){
+        const c = app.cpuPick(s2);
+        sum += s2.pool.cards.indexOf(c);
+        const sl = app.BB.openSlots(s2.roster, c)[0];
+        s2.roster[sl.k] = c; s2.picks++;
+      }
+      return sum / n;
+    };
+    const ace = depth('ace', 12), rook = depth('rook', 12);
+    ok(rook > ace, `a rookie reaches deeper than an ace (${rook.toFixed(0)} vs ${ace.toFixed(0)})`);
+
+    /* a whole league of computers drafts itself and plays */
+    app.L.seats = [{name: 'A', cpu: 'vet'}, {name: 'B', cpu: 'vet'}];
+    app.defaults();
+    await app.startLeague();
+    ok(app.L.seats.every(app.fullL), 'a league of nothing but computers fills itself');
+    const all = app.L.seats.flatMap(x => Object.values(x.roster)).map(c => c.kind + ':' + c.id);
+    eq(all.length, new Set(all).size, 'with nobody on two rosters');
+    const bad = app.L.seats.flatMap(x => app.BB.SLOTS.filter(sl => {
+      const p = x.roster[sl.k];
+      return p && p.kind === 'bat' && sl.pos !== 'DH' && !app.BB.canPlay(p, sl.pos);
+    }));
+    eq(bad.map(x => x.k), [], 'and every hitter somewhere he actually played');
+  }
+  {
+    /* a computer keeps no career, and beating one is not beating somebody */
+    app.BB.clearRecs();
+    app.BB.addRec({ts: 1, game: 'league', label: 'x', players: [
+      {name: 'You', w: 100, l: 62, win: true, roster: []},
+      {name: 'Ace', w: 62, l: 100, win: false, cpu: 'ace', roster: []}]});
+    const c = app.BB.career('league');
+    eq(c.map(x => x.name), ['You'], 'only the person has a career');
+    eq(c[0].solo, 1, 'and a league of one person is solo, however many computers were in it');
+    eq(c[0].titles, 0, 'so nothing was won');
+  }
+
   group('records');
   {
     app.BB.clearRecs();
     eq(app.BB.recs(), [], 'the store starts empty');
     eq(app.BB.career(), [], 'and so does the career table');
 
-    /* the league just played gets written when it finishes */
+    /* the league just played gets written when it finishes. Its managers are
+       made human first: an all-computer league is deliberately never won, and
+       this group is about what a record looks like, not who won it. */
+    app.L.seats.forEach(s => { s.cpu = null; });
     app.L.saved = false;
     app.finishLeague();
     const list = app.BB.recs();
