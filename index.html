@@ -141,6 +141,15 @@
       </div>
     </div>
 
+    <div class="card" id="rules-card">
+      <h2>House rules</h2>
+      <div class="pill-set" id="rules-set">
+        <button class="pill" data-rules="std" aria-pressed="true">Standard</button>
+        <button class="pill" data-rules="ext">Extreme</button>
+      </div>
+      <p class="hint" id="rules-note"></p>
+    </div>
+
     <div class="card" id="rounds-card">
       <h2>Rounds per game</h2>
       <div class="pill-set" id="rounds-set">
@@ -168,6 +177,14 @@
       <p>Stuck for an era? <strong class="gold">Surprise me</strong> on the setup screen rolls a random era and stat &mdash; including spans nobody has a board for.</p>
       <p>Typos and last names are forgiven. Naming someone already taken costs nothing, and if the name you typed isn't an exact match you'll be offered a short list of who you might have meant &mdash; drawn from the whole era, not the leaderboard, so the list gives nothing away.</p>
       <p>Most points when the dust settles wins.</p>
+    </div>
+    <div class="card">
+      <h2>Extreme</h2>
+      <p>A house-rules variant you turn on before a game. Three changes, and they hang together.</p>
+      <p><strong class="gold">There is no foul band.</strong> Past the top 100 is a strike, full stop. Nothing is forgiven that you have not earned.</p>
+      <p><strong class="gold">Naming the number one player earns one.</strong> The same rule as the standard game, except that here it is the <em>only</em> safety net there is: at two strikes it turns a pick from 101 to 140 into a free foul instead of strike three.</p>
+      <p><strong class="gold">You may call his rank.</strong> Type a number beside the name and you have bet on where he lands. Within 5 pays half his rank on top. More than 15 out costs you a quarter of it. Between the two, nothing happens either way.</p>
+      <p>A call only counts for men ranked 26 to 100. Calling the obvious names is not knowledge, so a call on anybody in the top 25 &mdash; or on somebody who turns out not to score at all &mdash; simply does not count, for or against.</p>
     </div>
     <div class="card">
       <h2>Other ways to play</h2>
@@ -334,6 +351,7 @@
       <label for="guess">Your pick</label>
       <div class="row">
         <input type="text" id="guess" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Type a player name">
+        <input type="number" id="call" class="hidden" inputmode="numeric" min="1" max="500" placeholder="Call" title="Call his rank — optional">
         <button class="btn shrink" id="submit">Submit</button>
       </div>
       <div id="confirm-slot"></div>

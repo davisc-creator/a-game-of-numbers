@@ -4,6 +4,7 @@ const S = {
   manifest: null, data: null,
   rangeId: null, post: false, catId: null, kind: 'span', custom: null,
   seats: ['', ''], rounds: 12, G: null, recSort: 'ppg', teams: [], teamMode: 'all',
+  extreme: false,
   fmt: {on: false, ws: false, mode: 'bo', n: 7, wsn: 1, randCat: false, randEra: false},
   SR: null,
 };
@@ -13,6 +14,22 @@ const S = {
    the list earns a one-pick extension of the foul band to 140 (2026-07-29);
    the band was 101-110 before that day. */
 const SCORE_TO = 100, FOUL_TO = 125, WIDE_TO = 140;
+
+/* ------------------------------------------------------------- extreme mode */
+/* A house-rules variant, chosen on the setup screen and recorded on the game.
+   Three changes that hang together: the safety net is gone, the only way to
+   earn one back is to name the best player on the board, and you may bet on
+   how deep a man ranks.
+
+   CALL_LO..SCORE_TO is where a call pays. Calling the top of the list is not
+   knowledge - everybody knows who is first - so a call outside that window
+   does not count at all, which is what stops "call rank 1 on Ruth every time"
+   from being the whole strategy. */
+const CALL_LO = 26, CALL_NEAR = 5, CALL_FAR = 15;
+const CALL_BONUS = 0.5, CALL_COST = 0.25;
+const extreme = () => !!(S.G ? S.G.extreme : S.extreme);
+/* where the strike zone starts: extreme has no foul band at all */
+const cutTo = () => extreme() ? SCORE_TO : FOUL_TO;
 const REC_KEY = 'offtheboard:records';
 let RECORDS = [];
 
@@ -484,7 +501,9 @@ function buildPool(){
     const base = {name: r[0], val: r[ci], rank: ranks[i], who: whoOf.get(r) || null,
                   id: idOf.has(r) ? idOf.get(r) : null};
     if (base.rank <= SCORE_TO) board.push({...base, zone: 'board', drafted: false, by: null});
-    else if (base.rank <= FOUL_TO) foul.push({...base, zone: 'foul', used: false});
+    /* extreme has no foul band: past the hundred is a strike, and the only
+       forgiveness is the one you earn by naming the number-one player */
+    else if (base.rank <= cutTo()) foul.push({...base, zone: 'foul', used: false});
     else off.push({...base, zone: 'off'});
   });
   for (const r of side.rows)
@@ -504,7 +523,7 @@ function buildPool(){
     (byFirst.get(f) || byFirst.set(f, []).get(f)).push(e);
   }
   return {board, foul, all, byName, byLast, byFirst, abbr: cat.abbr, label: cat.label,
-          depth: SCORE_TO, foulTo: FOUL_TO, listDepth: cat.depth,
+          depth: SCORE_TO, foulTo: cutTo(), listDepth: cat.depth,
           open: board.length, total: scored.length};
 }
 
@@ -610,6 +629,10 @@ function candidates(q, P, limit = 5){
 /* ------------------------------------------------------------------ game */
 function startGame(){
   if (S.fmt.on && (!S.SR || S.SR.done)) startSeries();
+  /* the board about to be built belongs to the game about to start, not the one
+     just finished - and the zones depend on which rules are in force, so the
+     old game has to be out of the way before buildPool reads them */
+  S.G = null;
   const pool = buildPool();
   S.G = {
     rangeId: S.rangeId, post: S.post, cat: S.catId,
@@ -623,6 +646,7 @@ function startGame(){
        `first` rotates the opening pick through the seats from game to game
        inside a series: in a one-pick game the second picker knows the number
        to beat, so going first every time is a real handicap. */
+    extreme: !!S.extreme,
     round: 0, pos: 0, maxRounds: (S.SR && S.SR.ws) ? (S.SR.wsn || 1) : S.rounds,
     first: (S.SR && !S.SR.done) ? S.SR.games.length % S.seats.length : 0,
     log: [], misses: [], saved: false,
@@ -635,9 +659,13 @@ function startGame(){
   $('g-era').textContent = S.data.label + (S.post ? ' \u00b7 Postseason' : '');
   $('g-cat').textContent = pool.label;
   setPlate('On the clock', '\u2014',
-    `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name a player`, '');
+    (extreme() ? `Top ${SCORE_TO} scores \u00b7 no foul band \u00b7 name a player`
+      : `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name a player`), '');
   /* a chooser left open when the last game was quit lives inside the game
      screen, so it would otherwise come back with this one and act on it */
+  /* the call box only exists in extreme, and never carries a bet between games */
+  $('call').classList.toggle('hidden', !extreme());
+  $('call').value = '';
   clearMsg(); clearConfirm(); renderGame(); focusGuess();
 }
 
@@ -670,7 +698,45 @@ function advance(){
 function submitGuess(){
   const raw = $('guess').value;
   clearConfirm();
+  /* the call is read once, here, and held for whatever this attempt becomes -
+     a chooser can land the pick several steps later */
+  S.G.call = extreme() ? callValue() : null;
   apply(resolve(raw), raw);
+}
+
+/* Whatever is in the call box, if it is a rank somebody could actually hold. */
+function callValue(){
+  const el = $('call');
+  const v = parseInt(el ? el.value : '', 10);
+  return (Number.isInteger(v) && v >= 1 && v <= 1e6) ? v : null;
+}
+
+/* What a call is worth against the rank that turned up. A call only counts in
+   the window where it takes knowledge, and it is a real bet, so a wild miss
+   costs something. */
+function callResult(call, rank){
+  if (call == null || rank == null) return null;
+  if (rank < CALL_LO || rank > SCORE_TO) return {k: 'void', call, rank, pts: 0};
+  const off = Math.abs(call - rank);
+  if (off <= CALL_NEAR)
+    return {k: off === 0 ? 'exact' : 'near', call, rank, off,
+            pts: Math.round(rank * CALL_BONUS)};
+  if (off > CALL_FAR)
+    return {k: 'wild', call, rank, off, pts: -Math.round(rank * CALL_COST)};
+  return {k: 'push', call, rank, off, pts: 0};
+}
+
+function callWord(c){
+  /* a void call has to say why, or it looks like the bet was simply ignored */
+  if (c.k === 'void')
+    return c.rank > SCORE_TO || c.rank == null
+      ? `You called ${c.call}, but he does not score — a call only counts on a man ranked ${CALL_LO} to ${SCORE_TO}.`
+      : `You called ${c.call} and he was ${c.rank}. Everybody knows the top ${CALL_LO - 1}, so that one counts for nothing either way.`;
+  const said = `You called ${c.call}, he was ${c.rank}`;
+  if (c.k === 'exact') return `${said} — on the nose. +${c.pts}.`;
+  if (c.k === 'near')  return `${said}, ${c.off} away. +${c.pts}.`;
+  if (c.k === 'wild')  return `${said}, ${c.off} away. That is a wild call: ${c.pts}.`;
+  return `${said}, ${c.off} away — close enough to keep, not close enough to pay.`;
 }
 
 /* Acting on a resolution, split out of submitGuess so that a name picked from
@@ -781,8 +847,12 @@ function score(e){
   const p = S.G.players[seat()];
   e.drafted = true; e.by = p.name;
   p.turns++; if (!S.G.tries) p.firstOk++; p.seq += 'p';
-  p.pts += e.rank; p.picks++; p.ranks.push(e.rank);
-  p.picked.push({n: e.name, r: e.rank, i: e.id});
+  const c = callResult(S.G.call, e.rank);
+  S.G.call = null;
+  p.pts += e.rank + (c ? c.pts : 0);
+  p.picks++; p.ranks.push(e.rank);
+  if (c && c.k !== 'void'){ p.calls = (p.calls || 0) + 1; if (c.pts > 0) p.callHits = (p.callHits || 0) + 1; }
+  p.picked.push({n: e.name, r: e.rank, i: e.id, ...(c && c.k !== 'void' ? {c: c.call, cp: c.pts} : {})});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val, id: e.id});
   clearMsg();
   /* Naming the number-one player is the one pick that pays nothing extra in
@@ -796,9 +866,11 @@ function score(e){
   } else {
     setPlate(`${p.name} scores`, String(e.rank),
       `${e.name} \u00b7 ${fmtVal(e.val)} ${S.G.abbr} \u00b7 ${ord(e.rank)} of ${S.G.pool.depth}`, 'good');
-    if (top) setMsg(`Number one. At two strikes, ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
+    if (c) setMsg(callWord(c), c.pts >= 0 ? 'good' : 'warn');
+  else if (top) setMsg(`Number one. At two strikes, ${p.name}'s foul band runs to ${WIDE_TO} for one pick.`, 'good');
   }
-  $('guess').value = ''; renderGame();
+  $('guess').value = ''; if ($('call')) $('call').value = '';
+  renderGame();
   setTimeout(advance, 280);
 }
 
@@ -821,7 +893,7 @@ function foul(f, wide){
     `${f.name} was ${ord(f.rank)} with ${fmtVal(f.val)} ${S.G.abbr}`, 'foul');
   setMsg(free ? (wide ? `${ord(f.rank)} would have been strike three \u2014 the extension makes it a free foul, and is used. Turn passes.`
                       : `Past the top ${SCORE_TO}, but at two strikes the foul is free. Turn passes.`)
-              : `Past the top ${SCORE_TO} \u2014 ${SCORE_TO + 1} to ${FOUL_TO} is a foul. Strike ${p.strikes}. Turn passes.`,
+              : `Past the top ${SCORE_TO} \u2014 ${SCORE_TO + 1} to ${cutTo()} is a foul. Strike ${p.strikes}. Turn passes.`,
          'warn');
   $('guess').value = ''; renderGame();
   setTimeout(advance, 420);
@@ -833,7 +905,7 @@ function strike(raw, e){
   /* An earned extension turns a near miss into a foul, once - but only at two
      strikes, where a foul is free and the alternative is being out. At nought
      or one it would be spent on an ordinary strike, so it is kept. */
-  if (e && e.rank && e.rank > FOUL_TO && e.rank <= WIDE_TO && p.wide > 0 && p.strikes >= 2){
+  if (e && e.rank && e.rank > cutTo() && e.rank <= WIDE_TO && p.wide > 0 && p.strikes >= 2){
     p.wide--;
     return foul(e, true);
   }
@@ -845,7 +917,7 @@ function strike(raw, e){
                    real: !!e, by: p.name});
   let sub;
   if (e && e.rank)      sub = `${e.name} \u2014 ${fmtVal(e.val)} ${S.G.abbr}, ${ord(e.rank)}`
-                              + (e.rank > FOUL_TO ? ` \u00b7 only the top ${SCORE_TO} score` : '');
+                              + (e.rank > cutTo() ? ` \u00b7 only the top ${SCORE_TO} score` : '');
   else if (e)           sub = `${e.name} \u2014 no ${S.G.abbr} in this era`;
   else                  sub = `${(raw || '').trim().slice(0, 28) || '\u2014'} didn't play in this era`;
   if (p.strikes >= 3) p.out = true;
@@ -878,6 +950,7 @@ function finish(){
     rec = {ts: Date.now(), range: G.rangeId, post: G.post, cat: G.cat, label: G.label,
       depth: G.pool.depth, y0: S.data && S.data.y0, y1: S.data && S.data.y1,
       teams: (S.data && S.data.teams) || null, solo,
+      ...(G.extreme ? {ext: true} : {}),
       misses: G.misses.map(m => ({n: m.name, r: m.rank, k: m.kind, by: m.by, ...(m.wide ? {w: true} : {})})),
       players: G.players.map(p => ({name: p.name.trim(), pts: p.pts, strikes: p.strikes,
         picks: p.picks, fouls: p.fouls, ranks: p.ranks, picked: p.picked,
@@ -1304,6 +1377,14 @@ function renderSeats(){
    format pills, the seat count, a finished series. A World Series needs no era,
    category or rounds of its own, so those cards go; leaving them up invites
    choosing something the roll is about to ignore. */
+function syncRules(){
+  document.querySelectorAll('#rules-set .pill').forEach(el =>
+    el.setAttribute('aria-pressed', String((el.dataset.rules === 'ext') === !!S.extreme)));
+  $('rules-note').textContent = S.extreme
+    ? `No foul band — past ${SCORE_TO} is a strike. Name the number-one player and you earn one back. Call a man's rank beside his name to bet on how deep he is.`
+    : `Top ${SCORE_TO} scores, ${SCORE_TO + 1}–${FOUL_TO} is a foul, ${FOUL_TO + 1} and beyond is a strike.`;
+}
+
 function syncFormat(){
   const press = (sel, on) => document.querySelectorAll(sel).forEach(x =>
     x.setAttribute('aria-pressed', String(on(x))));
@@ -1319,7 +1400,7 @@ function syncFormat(){
   $('wsn-note').textContent = wsn === 1
     ? 'One player each. One name, turned over together, deepest takes the game.'
     : `${wsn} players each, snake order. Most points across the ${wsn} takes the game.`;
-  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card'])
+  for (const id of ['era-card', 'team-card', 'cat-card', 'rounds-card', 'rules-card'])
     $(id).classList.toggle('hidden', ws);
   press('#fmt-set .pill', x => x.dataset.fmt === (!S.fmt.on ? 'single' : S.fmt.ws ? 'ws' : 'series'));
   press('#smode-set .pill', x => x.dataset.smode === S.fmt.mode);
@@ -2032,6 +2113,11 @@ function wire(){
   };
   $('tog-reg').onclick  = () => setSeason(false);
   $('tog-post').onclick = () => setSeason(true);
+  document.querySelectorAll('#rules-set .pill').forEach(el => el.onclick = () => {
+    S.extreme = el.dataset.rules === 'ext';
+    syncRules();
+  });
+  syncRules();
   document.querySelectorAll('#rounds-set .pill').forEach(el => el.onclick = () => {
     S.rounds = +el.dataset.rounds;
     document.querySelectorAll('#rounds-set .pill').forEach(x => x.setAttribute('aria-pressed','false'));
