@@ -369,7 +369,7 @@ const BB = (() => {
   const thin = roster => SLOTS.map(sl => {
     const p = roster[sl.k];
     return p ? {k: sl.k, n: p.name, i: p.id, pos: p.pos,
-                g: p.kind === 'bat' ? p.ops : p.eraM, b: p.kind === 'bat'} : null;
+                g: p.kind === 'bat' ? p.ops : eraPlus(p.eraM), b: p.kind === 'bat'} : null;
   }).filter(Boolean);
 
   function addRec(rec){
@@ -471,7 +471,7 @@ const BB = (() => {
             <div class="hb-who">${esc(p.name)}
               <span class="mono">${p.w}-${p.l} · ${p.rs != null ? p.rs.toFixed(2) + ' RS / ' + p.ra.toFixed(2) + ' RA' : ''}${p.from ? ' · ' + esc(p.from) : ''}</span></div>
             ${(p.roster || []).map(x =>
-              `<div class="gm-pick"><span class="r">${x.k}</span>${esc(x.n)}<span class="tag">${x.g} ${x.b ? 'OPS+' : 'ERA−'}</span></div>`).join('')
+              `<div class="gm-pick"><span class="r">${x.k}</span>${esc(x.n)}<span class="tag">${x.g} ${x.b ? 'OPS+' : 'ERA+'}</span></div>`).join('')
               || '<div class="gm-pick"><span class="r">—</span>roster not recorded</div>'}
           `).join('')}
         </div>
@@ -489,8 +489,17 @@ const BB = (() => {
       : '';
   }
 
+  /* ERA+ is what people read, ERA− is what the arithmetic needs. The two are
+     reciprocals - 10000/x - so the display can be one while the simulation
+     stays the other, and it has to: strength() takes an innings-weighted mean
+     of the staff, and a mean is only correct on a stat that is linear in runs
+     allowed. ERA− is (ERA / lgERA), so it is. ERA+ is (lgERA / ERA), so
+     averaging it invents an ace: two pitchers at 2.00 and 6.00 in a 4.00 league
+     average to a true 4.00 staff, which ERA− gives and ERA+ reads as 3.00. */
+  const eraPlus = eraM => (eraM > 0 ? Math.round(10000 / eraM) : 0);
+
   return {FIELD, SLOTS, MIN_AB, MIN_OUTS, REF_RPG, PYTH,
-          positions, canPlay, POS_SHARE, POS_MIN,
+          positions, canPlay, POS_SHARE, POS_MIN, eraPlus,
           norm, lastOf, firstOf, lev, ALIASES, findByName,
           REC_KEY, recs, addRec, importRecs, career, thin, renderRecs,
           clearRecs(){ RECS = []; saveRecs(); },

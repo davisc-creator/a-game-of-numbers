@@ -215,7 +215,7 @@ function card(c){
        <span>${c.w}-${c.l}${c.sv ? ` · ${c.sv} SV` : ''} · ${c.so} K · ${c.ip} IP</span>`;
   const idx = c.kind === 'bat'
     ? `<b class="${c.ops >= 100 ? 'up' : ''}">${c.ops}</b><span>OPS+</span>`
-    : `<b class="${c.eraM <= 100 ? 'up' : ''}">${c.eraM}</b><span>ERA−</span>`;
+    : `<b class="${c.eraM <= 100 ? 'up' : ''}">${BB.eraPlus(c.eraM)}</b><span>ERA+</span>`;
   return `<button class="pcard" data-id="${c.id}" data-kind="${c.kind}">
     <div class="ph"><span class="pos">${c.pos}</span><span class="nm">${esc1(c.name)}</span></div>
     <div class="pidx">${idx}</div>
@@ -296,7 +296,7 @@ function renderRoster(){
     return `<div class="slot${p ? ' on' : ''}">
       <span class="k">${s.k}</span>
       <span class="v">${p ? esc1(p.name) : '—'}</span>
-      <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : p.eraM + ' ERA−') : ''}</span>
+      <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : BB.eraPlus(p.eraM) + ' ERA+') : ''}</span>
     </div>`;
   }).join('');
   if (G.seats.length > 1)
@@ -327,7 +327,7 @@ function renderResults(){
       <div class="step"><b>${r3(m.obpP).toFixed(2)}×</b><span>your hitters' on-base, against their own leagues</span></div>
       <div class="step"><b>${r3(m.slgP).toFixed(2)}×</b><span>and their slugging</span></div>
       <div class="step"><b>${r1(m.rs).toFixed(2)}</b><span>runs scored per game &nbsp;=&nbsp; ${REF_RPG} × ${r3(m.obpP).toFixed(2)} × ${r3(m.slgP).toFixed(2)}</span></div>
-      <div class="step"><b>${Math.round(m.raM)}</b><span>staff ERA−, weighted by innings (100 is average, lower is better)</span></div>
+      <div class="step"><b>${BB.eraPlus(m.raM)}</b><span>staff ERA+, weighted by innings (100 is average, higher is better)</span></div>
       <div class="step"><b>${r1(m.ra).toFixed(2)}</b><span>runs allowed per game &nbsp;=&nbsp; ${REF_RPG} × ${Math.round(m.raM)} ÷ 100</span></div>
       <div class="step"><b>${pct(m.wpct)}</b><span>expected win rate &nbsp;=&nbsp; RS<sup>1.83</sup> ÷ (RS<sup>1.83</sup> + RA<sup>1.83</sup>)</span></div>
       <div class="step"><b>${m.expW}-${162 - m.expW}</b><span>the record that predicts</span></div>

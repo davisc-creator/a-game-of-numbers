@@ -17,19 +17,22 @@ const SCORE_TO = 100, FOUL_TO = 125, WIDE_TO = 140;
 
 /* ------------------------------------------------------------- extreme mode */
 /* A house-rules variant, chosen on the setup screen and recorded on the game.
-   Three changes that hang together: the safety net is gone, the only way to
-   earn one back is to name the best player on the board, and you may bet on
-   how deep a man ranks.
+   Everything the standard game does still applies - the foul band included -
+   and on top of it you may call a man's rank before you name him.
 
-   CALL_LO..SCORE_TO is where a call pays. Calling the top of the list is not
-   knowledge - everybody knows who is first - so a call outside that window
-   does not count at all, which is what stops "call rank 1 on Ruth every time"
-   from being the whole strategy. */
-const CALL_LO = 26, CALL_NEAR = 5, CALL_FAR = 15;
-const CALL_BONUS = 0.5, CALL_COST = 0.25;
+   The call is pure upside: call 83 on Julio Rodriguez, find he was 85, and you
+   are paid a little for knowing where he sits. Being wrong is worth nothing,
+   never less than nothing, and nothing about the ordinary pick changes.
+
+   The bonus is a share of the rank, which is what stops "name the obvious man
+   and call him first" from being a strategy: calling the number-one player
+   correctly pays a share of 1. The deeper the man, the more knowing his exact
+   place is worth - which is the same reason the game scores rank in the first
+   place. No window and no penalty are needed to make that work. */
+const CALL_NEAR = 5;
+const CALL_BONUS = 0.2, CALL_EXACT = 0.35;
 const extreme = () => !!(S.G ? S.G.extreme : S.extreme);
-/* where the strike zone starts: extreme has no foul band at all */
-const cutTo = () => extreme() ? SCORE_TO : FOUL_TO;
+const cutTo = () => FOUL_TO;
 const REC_KEY = 'offtheboard:records';
 let RECORDS = [];
 
@@ -659,7 +662,8 @@ function startGame(){
   $('g-era').textContent = S.data.label + (S.post ? ' \u00b7 Postseason' : '');
   $('g-cat').textContent = pool.label;
   setPlate('On the clock', '\u2014',
-    (extreme() ? `Top ${SCORE_TO} scores \u00b7 no foul band \u00b7 name a player`
+    (extreme()
+      ? `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name him and call his rank`
       : `Top ${SCORE_TO} scores \u00b7 ${SCORE_TO + 1}\u2013${FOUL_TO} is a foul \u00b7 name a player`), '');
   /* a chooser left open when the last game was quit lives inside the game
      screen, so it would otherwise come back with this one and act on it */
@@ -711,32 +715,22 @@ function callValue(){
   return (Number.isInteger(v) && v >= 1 && v <= 1e6) ? v : null;
 }
 
-/* What a call is worth against the rank that turned up. A call only counts in
-   the window where it takes knowledge, and it is a real bet, so a wild miss
-   costs something. */
+/* What a call is worth against the rank that turned up. Never negative, and
+   never anything but a bonus on a pick that already scored. */
 function callResult(call, rank){
   if (call == null || rank == null) return null;
-  if (rank < CALL_LO || rank > SCORE_TO) return {k: 'void', call, rank, pts: 0};
   const off = Math.abs(call - rank);
-  if (off <= CALL_NEAR)
-    return {k: off === 0 ? 'exact' : 'near', call, rank, off,
-            pts: Math.round(rank * CALL_BONUS)};
-  if (off > CALL_FAR)
-    return {k: 'wild', call, rank, off, pts: -Math.round(rank * CALL_COST)};
-  return {k: 'push', call, rank, off, pts: 0};
+  if (off > CALL_NEAR) return {k: 'miss', call, rank, off, pts: 0};
+  const share = off === 0 ? CALL_EXACT : CALL_BONUS;
+  return {k: off === 0 ? 'exact' : 'near', call, rank, off,
+          pts: Math.max(1, Math.round(rank * share))};
 }
 
 function callWord(c){
-  /* a void call has to say why, or it looks like the bet was simply ignored */
-  if (c.k === 'void')
-    return c.rank > SCORE_TO || c.rank == null
-      ? `You called ${c.call}, but he does not score — a call only counts on a man ranked ${CALL_LO} to ${SCORE_TO}.`
-      : `You called ${c.call} and he was ${c.rank}. Everybody knows the top ${CALL_LO - 1}, so that one counts for nothing either way.`;
   const said = `You called ${c.call}, he was ${c.rank}`;
   if (c.k === 'exact') return `${said} — on the nose. +${c.pts}.`;
   if (c.k === 'near')  return `${said}, ${c.off} away. +${c.pts}.`;
-  if (c.k === 'wild')  return `${said}, ${c.off} away. That is a wild call: ${c.pts}.`;
-  return `${said}, ${c.off} away — close enough to keep, not close enough to pay.`;
+  return `${said}, ${c.off} away — no bonus, and nothing lost.`;
 }
 
 /* Acting on a resolution, split out of submitGuess so that a name picked from
@@ -851,8 +845,8 @@ function score(e){
   S.G.call = null;
   p.pts += e.rank + (c ? c.pts : 0);
   p.picks++; p.ranks.push(e.rank);
-  if (c && c.k !== 'void'){ p.calls = (p.calls || 0) + 1; if (c.pts > 0) p.callHits = (p.callHits || 0) + 1; }
-  p.picked.push({n: e.name, r: e.rank, i: e.id, ...(c && c.k !== 'void' ? {c: c.call, cp: c.pts} : {})});
+  if (c){ p.calls = (p.calls || 0) + 1; if (c.pts > 0) p.callHits = (p.callHits || 0) + 1; }
+  p.picked.push({n: e.name, r: e.rank, i: e.id, ...(c ? {c: c.call, cp: c.pts} : {})});
   S.G.log.push({rank: e.rank, name: e.name, by: p.name, val: e.val, id: e.id});
   clearMsg();
   /* Naming the number-one player is the one pick that pays nothing extra in
@@ -1381,7 +1375,7 @@ function syncRules(){
   document.querySelectorAll('#rules-set .pill').forEach(el =>
     el.setAttribute('aria-pressed', String((el.dataset.rules === 'ext') === !!S.extreme)));
   $('rules-note').textContent = S.extreme
-    ? `No foul band — past ${SCORE_TO} is a strike. Name the number-one player and you earn one back. Call a man's rank beside his name to bet on how deep he is.`
+    ? `Everything the standard game does, plus this: call a man's rank beside his name and land within ${CALL_NEAR} for a bonus. Being wrong costs nothing.`
     : `Top ${SCORE_TO} scores, ${SCORE_TO + 1}–${FOUL_TO} is a foul, ${FOUL_TO + 1} and beyond is a strike.`;
 }
 

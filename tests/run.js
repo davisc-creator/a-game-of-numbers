@@ -94,7 +94,7 @@ function loadApp(){
    renderProfile, SORTERS, rarityIndex, bestStreak, diverge,
    candidates, apply, askCandidates, takeNamed, spanOf, ALIASES,
    soloPriorBest, renderSeats, renderRecords, histPicks, syncFormat, rollEra, WS,
-   callResult, callValue, cutTo, extreme, syncRules, CALL_LO, CALL_NEAR, CALL_FAR,
+   callResult, callValue, cutTo, extreme, syncRules, CALL_NEAR, CALL_BONUS, CALL_EXACT,
    revealDone, renderReveal, sealed,
    SCORE_TO, FOUL_TO, WIDE_TO, loadRecords, loadRange,
    getRecords: () => RECORDS, setRecords: v => { RECORDS = v; }})`;
@@ -962,97 +962,70 @@ group('past games open on the records screen');
   ok(!/recorded before/.test(none), 'without borrowing the older-record wording');
 }
 
-group('extreme: no foul band');
-{
-  app.S.extreme = true;
-  const G = gameOn(app, 'bat_h6', ['A', 'B']);
-  ok(G.extreme, 'the game carries the mode, so a series cannot change it half way');
-  eq(app.cutTo(), 100, 'the strike zone starts right after the hundred');
-  eq(G.pool.foul.length, 0, 'there is no foul band at all');
-  eq(G.pool.foulTo, 100, 'and the pool says so');
-  const at = r => G.pool.all.find(e => e.rank === r);
-  eq(at(101).zone, 'off', '101 is off the board, not a foul');
-  eq(at(125).zone, 'off', 'and so is 125, which the standard game forgives');
-
-  /* the only forgiveness is the one you earn */
-  app.strike('x', at(110)); app.__drain();
-  eq(G.players[0].strikes, 1, 'without an extension, 110 is a strike');
-  app.S.G.pos = 1; app.S.G.round = 0;
-  app.score(G.pool.board.find(e => e.name === 'Lou Gehrig')); app.__drain();
-  const B = G.players[1];
-  eq(B.wide, 1, 'naming the number-one player earns one');
-  B.strikes = 2;
-  app.S.G.pos = 1; app.S.G.round = 0;
-  app.strike('x', at(110)); app.__drain();
-  eq(B.strikes, 2, 'at two strikes it turns 110 into a free foul rather than strike three');
-  ok(!B.out, 'so he is still in');
-  eq(B.wide, 0, 'and it is spent');
-  app.S.extreme = false;
-}
-{
-  /* standard is untouched by any of it */
-  app.S.extreme = false;
-  const G = gameOn(app, 'bat_h6', ['A']);
-  eq(app.cutTo(), 125, 'the standard cut is still 125');
-  eq(G.pool.foul.length, 25, 'with its twenty-five fouls');
-}
-
 group('extreme: calling his rank');
 {
-  const R = (call, rank) => app.callResult(call, rank);
-  eq(R(null, 50), null, 'no call, nothing to settle');
-  /* the window that stops the obvious names being the whole strategy */
-  eq(R(1, 1).k, 'void', 'calling the number-one player counts for nothing');
-  eq(R(3, 25).k, 'void', 'nor does anybody in the top 25');
-  eq(R(50, null), null, 'nor a man who did not score at all');
-  eq(R(30, 26).k, 'near', 'from 26 down it counts');
-
-  eq(R(60, 60).k, 'exact', 'calling it on the nose');
-  eq(R(60, 60).pts, 30, 'pays half his rank');
-  eq(R(55, 60).k, 'near', 'five away still pays');
-  eq(R(55, 60).pts, 30, 'the same');
-  eq(R(54, 60).k, 'push', 'six away is a push');
-  eq(R(54, 60).pts, 0, 'worth nothing either way');
-  eq(R(45, 60).k, 'push', 'and so is fifteen away');
-  eq(R(44, 60).k, 'wild', 'past fifteen is a wild call');
-  eq(R(44, 60).pts, -15, 'and costs a quarter of his rank');
-  eq(R(200, 100).pts, -25, 'the deeper the man, the more a wild call costs');
-
-  /* and it lands on the score */
+  /* every standard rule still applies - the foul band above all */
   app.S.extreme = true;
   const G = gameOn(app, 'bat_h6', ['A']);
+  ok(G.extreme, 'the game carries the mode, so a series cannot change it half way');
+  eq(app.cutTo(), 125, 'the foul band is untouched');
+  eq(G.pool.foul.length, 25, 'all twenty-five of it');
+  eq(G.pool.foulTo, 125, 'and the pool says so');
+  eq(G.pool.all.find(e => e.rank === 110).zone, 'foul', '110 is still a foul, not a strike');
+
+  const R = (call, rank) => app.callResult(call, rank);
+  eq(R(null, 50), null, 'no call, nothing to settle');
+  eq(R(50, null), null, 'and nothing to settle on a man who did not score');
+
+  /* the case that prompted it */
+  eq(R(83, 85).k, 'near', 'calling 83 on a man who was 85 is a hit');
+  eq(R(83, 85).pts, 17, 'and pays a fifth of his rank');
+  eq(R(85, 85).k, 'exact', 'on the nose');
+  eq(R(85, 85).pts, 30, 'pays a third');
+  eq(R(80, 85).pts, 17, 'five away still pays');
+  eq(R(79, 85).k, 'miss', 'six away does not');
+  eq(R(79, 85).pts, 0, 'and is worth nothing');
+
+  /* never negative, and never a reason not to call */
+  eq(R(1, 500).pts, 0, 'a wild call costs nothing');
+  eq(R(400, 30).pts, 0, 'however wild');
+  ok([1, 5, 26, 50, 100].every(r => R(r, r).pts > 0), 'an exact call pays at every depth');
+  /* which is what makes the obvious names not worth calling */
+  ok(R(1, 1).pts < R(85, 85).pts / 8,
+     `calling the number-one player right pays ${R(1, 1).pts}, against ${R(85, 85).pts} for an 85th`);
+
+  /* and it lands on the score */
   const deep = G.pool.board.find(e => e.rank === 60);
-  ok(deep, 'a man at rank 60 to bet on');
   app.__el('call').value = '58';
   app.__el('guess').value = deep.name;
   app.submitGuess(); app.__drain();
-  eq(G.players[0].pts, 60 + 30, 'a good call pays on top of the rank');
+  eq(G.players[0].pts, 60 + 12, 'a good call pays on top of the rank');
   eq(G.players[0].picked[0].c, 58, 'the record keeps what was called');
-  eq(G.players[0].picked[0].cp, 30, 'and what it paid');
-  eq(G.players[0].calls, 1, 'the call is counted');
-  eq(G.players[0].callHits, 1, 'as a hit');
+  eq(G.players[0].picked[0].cp, 12, 'and what it paid');
+  eq([G.players[0].calls, G.players[0].callHits], [1, 1], 'counted, and counted as a hit');
   eq(app.__el('call').value, '', 'and the box is cleared, so no bet carries to the next pick');
 }
 {
-  /* a wild call costs, and cannot take a pick below nothing worth having */
+  /* a missed call takes nothing away from the pick */
   app.S.extreme = true;
   const G = gameOn(app, 'bat_h6', ['A']);
   const deep = G.pool.board.find(e => e.rank === 80);
   app.__el('call').value = '10';
   app.__el('guess').value = deep.name;
   app.submitGuess(); app.__drain();
-  eq(G.players[0].pts, 80 - 20, 'a wild call is charged against the pick');
-  eq(G.players[0].callHits, undefined, 'and is not counted as a hit');
-  ok(G.players[0].pts > 0, 'the pick is still worth having — a bad bet is not a strike');
+  eq(G.players[0].pts, 80, 'the pick is worth exactly its rank, no more and no less');
+  eq(G.players[0].calls, 1, 'the call is counted');
+  eq(G.players[0].callHits, undefined, 'but not as a hit');
 }
 {
   /* the standard game ignores the box entirely */
   app.S.extreme = false;
   const G = gameOn(app, 'bat_h6', ['A']);
+  eq(G.pool.foul.length, 25, 'standard still has its foul band');
   app.__el('call').value = '60';
   app.__el('guess').value = G.pool.board.find(e => e.rank === 60).name;
   app.submitGuess(); app.__drain();
-  eq(G.players[0].pts, 60, 'no bet is settled outside extreme');
+  eq(G.players[0].pts, 60, 'no call is settled outside extreme');
   app.S.extreme = false;
 }
 

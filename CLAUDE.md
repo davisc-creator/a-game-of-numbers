@@ -149,25 +149,24 @@ value and rank, which needs every player, not just the ranked ones.
 - Drafted players leave the shared pool for everyone.
 
 **Extreme** (`S.extreme`, recorded on the game as `G.extreme` and on the record
-as `ext`) is a house-rules variant chosen on the setup screen. Three changes
-that hang together:
+as `ext`) is the standard game plus one thing: you may **call a man's rank**
+before you name him. Within `CALL_NEAR` (5) pays `CALL_BONUS` (a fifth of his
+rank), exactly right pays `CALL_EXACT` (a third).
 
-- **No foul band.** `cutTo()` returns `SCORE_TO` instead of `FOUL_TO`, so
-  `buildPool` puts everything past the hundred in `off`. Nothing is forgiven
-  that has not been earned.
-- **The number-one rule becomes the only safety net there is** — which is the
-  point of putting it here. It still only fires at two strikes, and now covers
-  101–140 rather than 126–140, because `cutTo()` moved.
-- **Call his rank.** An optional number beside the name is a bet. Within
-  `CALL_NEAR` (5) pays `CALL_BONUS` (half his rank); past `CALL_FAR` (15) costs
-  `CALL_COST` (a quarter). Between them, nothing.
+**The call is pure upside and must stay that way.** Missing is worth nothing,
+never less than nothing, and the pick still scores its rank as usual. An earlier
+version had a window (26–100) and a penalty for a wild call; the owner rejected
+both on 2026-08-23 — *"i dont want players to get less points for not guessing
+the number right or for them being in the top 25"*.
 
-**A call only counts from `CALL_LO` (26) to `SCORE_TO`.** Everybody knows who is
-first, so calling the obvious names is not knowledge — without this window the
-whole strategy is "name Ruth, call 1, every time". A call outside it is void,
-for *and* against, and the screen says why rather than appearing to ignore the
-bet. The record keeps `c` (what was called) and `cp` (what it paid) on the pick,
-and `calls`/`callHits` on the player.
+**The bonus is a share of the rank, which is what makes the window unnecessary.**
+The original worry was "then I would just call the top five guys". Calling the
+number-one player correctly pays a share of 1 — one point. Calling an 85th
+correctly pays 30. Knowing a man sits 85th is the hard part and that is what
+pays, so the obvious names are not worth calling and nothing has to forbid it.
+
+*Extreme briefly also removed the foul band. The owner rejected that on
+2026-08-23; every standard rule applies in extreme, the foul band included.*
 
 **`startGame` nulls `S.G` before `buildPool`.** The zones depend on which rules
 are in force and `extreme()` prefers the live game, so building the new board
@@ -597,7 +596,7 @@ Not requested yet; the owner will direct priorities.
 - **Run all five suites before every commit** — `node tests/run.js`,
   `node tests/run1620.js`, `node tests/run-shell.js`, `node tests/run-sw.js`,
   `node tests/run-league.js`.
-  850 assertions, no
+  839 assertions, no
   dependencies, about fifteen seconds. It loads `app.js` into a `vm` with a stub DOM
   rather than requiring any test scaffolding inside `app.js` — keep it that way,
   and the same for `sw.js` against a stub `CacheStorage`.
@@ -645,6 +644,18 @@ on the old code:
 
 Abandoning a draft sets `G.done`, so `isDirty()` stops asking about a draft
 the player already threw away.
+
+**ERA+ is displayed, ERA− is computed** (2026-08-23). They are reciprocals
+(`BB.eraPlus` is 10000/x) so the display can be one while the arithmetic stays
+the other — and it has to be. `strength()` takes an innings-weighted mean of the
+staff, and a mean is only correct on a stat linear in runs allowed. ERA− is
+(ERA / lgERA), so it is; ERA+ is (lgERA / ERA), so averaging it invents an ace:
+two pitchers at 2.00 and 6.00 in a 4.00 league are a true 4.00 staff, which ERA−
+gives and ERA+ reads as 3.00. Never average ERA+.
+
+Game 100's `pit_em` category is a different thing — a leaderboard baked into the
+data files, sorted ascending, and still ERA−. Changing that means regenerating
+`data/` and reworking the custom-range parity test, so it was left alone.
 
 **Era normalization is the whole game.** League batting average was .296 in 1930
 and .237 in 1968. On raw numbers every optimal roster is a 1930s roster and the

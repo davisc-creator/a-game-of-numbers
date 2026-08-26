@@ -198,7 +198,7 @@ function takeL(card){
      the computers answer immediately, and overwriting the line meant you saw
      somebody else's pick where your own should have been. */
   (L.feed = L.feed || []).push(
-    `${seat.name} takes ${card.name} — ${slots[0].k}, ${card.kind === 'bat' ? card.ops + ' OPS+' : card.eraM + ' ERA−'}.`);
+    `${seat.name} takes ${card.name} — ${slots[0].k}, ${card.kind === 'bat' ? card.ops + ' OPS+' : BB.eraPlus(card.eraM) + ' ERA+'}.`);
   showFeed();
   nextTurnL();
   /* the computer managers take their turns before the screen comes back to a
@@ -598,7 +598,7 @@ function renderRostersL(){
         const movable = mine && p && moveSlots(s, sl.k).length;
         const body = `<span class="k">${sl.k}</span>
           <span class="v">${p ? escL(p.name) : '—'}</span>
-          <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : p.eraM + ' ERA−') : ''}</span>`;
+          <span class="i">${p ? (p.kind === 'bat' ? p.ops + ' OPS+' : BB.eraPlus(p.eraM) + ' ERA+') : ''}</span>`;
         return movable
           ? `<button class="slot on movable" data-lmove="${sl.k}" title="Move him">${body}<span class="mv">move</span></button>`
           : `<div class="slot${p ? ' on' : ''}">${body}</div>`;
@@ -671,7 +671,7 @@ function renderLeagueResults(){
   $L('l-detail').innerHTML = table.map(r => `
     <div class="lg-line">
       <div class="lg-nm">${escL(r.name)}${(L.each || L.src === 'club') ? ` <span class="mono">${eraOf(r.name)}</span>` : ''}</div>
-      <div class="mono">${(r.obpP * 100).toFixed(0)} OBP+ · ${(r.slgP * 100).toFixed(0)} SLG+ · ${r.raM.toFixed(0)} staff ERA−</div>
+      <div class="mono">${(r.obpP * 100).toFixed(0)} OBP+ · ${(r.slgP * 100).toFixed(0)} SLG+ · ${BB.eraPlus(r.raM)} staff ERA+</div>
       <div class="mono">${r.rs.toFixed(2)} runs scored a game, ${r.ra.toFixed(2)} allowed</div>
     </div>`).join('');
   /* the round robin, so a manager can see who actually beat whom */
@@ -684,7 +684,7 @@ function renderLeagueResults(){
     }).join('')}</tr>`).join('')}</tbody></table>`;
   $L('l-how').textContent =
     ((L.each || L.src === 'club') ? 'Every club is measured against the baseball played in its own era — a 150 OPS+ in 1930 and a 150 OPS+ in 1999 are the same distance above average — which is what lets clubs from different decades meet. ' : '') +
-    `Each pair played ${per} games. A club's offence is its hitters' on-base and slugging against the era's league average, weighted by plate appearances; its pitching is the staff ERA− weighted by a realistic innings split. In a game between two clubs each offence is scaled by the other's staff, and ${BB.PYTH} is the Pythagorean exponent that turns the two run rates into a win chance.`;
+    `Each pair played ${per} games. A club's offence is its hitters' on-base and slugging against the era's league average, weighted by plate appearances; its pitching is the staff ERA− weighted by a realistic innings split, shown as ERA+ because that is what people read. In a game between two clubs each offence is scaled by the other's staff, and ${BB.PYTH} is the Pythagorean exponent that turns the two run rates into a win chance.`;
 }
 
 /* ------------------------------------------------------------------ wiring */
